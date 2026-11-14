@@ -1,0 +1,12 @@
+# Release artifacts
+RoguePoison-v*.zip
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Agent tool configs (Claude Code, Codex, etc.)
+.claude/
+.agents/

@@ -1,0 +1,110 @@
+# RoguePoison — Project Guide
+
+WoW addon for **Rogues on WoW Forever** only. Shows a bar of the poisons in the
+player's bags plus sharpening stones (one icon per type, highest rank in
+bags, stack count on the icon). Left-click applies to the main hand,
+right-click to the off hand. Warns when poisons, sharpening stones or Flash
+Powder run low. Poison-crafting reagents are deliberately not tracked.
+
+## Target client
+
+- WoW Forever = the 12.1 Mainline engine with vanilla content (Blizzard game
+  type "camelot"). `## Interface: 16001`. It reports `WOW_PROJECT_MAINLINE`, so
+  there is no per-flavor code path.
+- Use the namespaced 12.1.5 API (`C_Item.*`, `C_AddOns.*`, `C_PaperDollInfo.*`,
+  `Settings.*`). Deprecated globals (`GetItemCount`, `GetItemInfo`,
+  `GetWeaponEnchantInfo`, `Round`, …) are gone — no `or LegacyGlobal` fallbacks.
+- Item IDs are the vanilla ones (`Data/Poisons.lua`).
+- Weapon poison state comes from
+  `C_PaperDollInfo.GetTemporaryEnchantmentInfo(slot)` (`remainingTimeMs`,
+  `chargesRemaining`; `nil` = no poison). Guard reads with `issecretvalue`.
+
+## Directory layout
+
+The outer `RoguePoison/` is the git repo. The inner `RoguePoison/` is the addon
+folder that ships; `release.sh` packages only it.
+
+```
+RoguePoison/
+  RoguePoison.toc
+  Libs/            Ace3 (DB, DBOptions, GUI, Config), LDB, LibDBIcon
+  Locales/         Locales.lua (registry, ns.L), enUS (fallback), zhCN, zhTW
+  Data/Poisons.lua item types (poisons + sharpening stones) → item IDs, highest rank first; ns.ITEM
+  Init.lua         ns setup, module registry, bootstrap, minimap icon, slash
+  Config.lua       AceDB defaults (RoguePoisonDB)
+  Modules/PoisonBar.lua  the bar, tooltips, stock warnings
+  Options.lua      AceGUI settings window + Blizzard Settings entry
+tests/poisonbar_spec.lua  stubbed-API spec, no client needed
+```
+
+## Load order
+
+Libs → Locales → Data → `Init.lua` → `Config.lua` → Modules → `Options.lua`.
+
+## Conventions
+
+- Every file starts with `local addonName, ns = ...`; share state via `ns`, not globals.
+- Modules: `ns:RegisterModule(id, M)` and implement `OnDBReady`,
+  `OnPlayerLogin`, `Refresh` as needed. `OnPlayerLogin` only runs when the
+  player is a Rogue (`ns.active`). No per-module bootstrap frames.
+- After changing a setting call `ns:RefreshAll()`.
+- Every user-visible string goes through `ns.L[...]`; add the key to all three
+  locale files (same key order).
+- Localisation is our own registry (`Locales/Locales.lua`), not AceLocale, so
+  the language can change at runtime. `ns.L` is a proxy resolving each key
+  against the active locale, then enUS, then the key itself — always look keys
+  up when rendering, never cache translated text. The choice lives in
+  `ns.db.global.locale` (`"auto"` = game client) and is changed through
+  `ns:SetLanguage(code)`, which refreshes modules and rebuilds the open settings
+  window. Not covered: the AceDBOptions profiles page and the Blizzard Settings
+  entry name (follow the client / need `/reload`). Item names always come from
+  the client.
+- Settings live in `ns.db.profile`; defaults only in `Config.lua`.
+  `ns.db.char.seen[type] = itemID` remembers the highest rank seen per poison
+  type, so a poison that ran out still drives stock warnings.
+- No code comments.
+
+## Display rules
+
+- The bar shows when enabled and either unlocked (preview/move mode) or a
+  weapon needs poison: equipped weapon with no poison, time left below
+  `timeThreshold` minutes, or charges below `chargesThreshold` (0 disables a check).
+- Stock warnings (text under the bar, independent of bar visibility):
+  selected rank of each enabled type below `poisonThreshold`, Flash Powder
+  below `flashThreshold` (only once Vanish is known).
+
+## Combat lockdown
+
+The poison buttons are `SecureActionButtonTemplate` with
+`type1/macrotext1 = "/use item:<id>\n/use 16"` and `type2/macrotext2 … /use 17`.
+The bar container therefore counts as protected: positioning, size,
+attributes and Show/Hide happen only out of combat (`M:ApplySecure`). In combat
+those changes set `pendingSecure` and are applied on `PLAYER_REGEN_ENABLED`.
+Count text and warnings are plain font strings and update any time.
+
+Everything is hidden in combat: the bar and the warning text are children of a
+frame driven by `RegisterStateDriver(..., "visibility", "[combat] hide; show")`.
+The settings window closes on `PLAYER_REGEN_DISABLED` and reopens on the same
+tab, with the same lock state, on `PLAYER_REGEN_ENABLED`; `ns:OpenOptions`
+called in combat is deferred the same way.
+
+## Testing
+
+- `lua tests/poisonbar_spec.lua` — loads the addon against stubbed WoW APIs and
+  checks visibility, click macros, warnings and that no protected call happens
+  in combat. Extend it when changing `PoisonBar.lua`.
+- `luac -p` every changed Lua file.
+- In game: `/rpoison` opens settings, `/rpoison unlock|lock|reset`.
+
+## Release workflow
+
+Releases are cut through `/release` (`.claude/commands/release.md`, mirrored
+for Codex at `.agents/skills/source-command-release/SKILL.md`; both local and
+gitignored). The `## Version:` in the `.toc` is always the next unreleased
+version. `bash release.sh` builds `RoguePoison-v<version>.zip`.
+
+Test builds go through `/beta` (`.claude/commands/beta.md`, mirrored at
+`.agents/skills/source-command-beta/SKILL.md`): runs the checks and
+`bash release.sh --beta` → `RoguePoison-v<version>-beta.zip`, with no
+CHANGELOG edit, commit, tag or version bump. Do **not** push
+unless asked; uploads to CurseForge/WoWInterface are manual.

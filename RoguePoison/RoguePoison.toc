@@ -1,0 +1,35 @@
+## Interface: 16001
+## Title: RoguePoison
+## Title-zhCN: 盗贼毒药
+## Title-zhTW: 盜賊毒藥
+## Notes: Rogue poison bar for WoW Forever: click to apply poisons and sharpening stones, warns about expiring poisons and low stock.
+## Notes-zhCN: WoW Forever 盗贼毒药栏:点击涂抹毒药和磨刀石,提示毒药即将消失和数量不足。
+## Notes-zhTW: WoW Forever 盜賊毒藥欄:點擊塗抹毒藥和磨刀石,提示毒藥即將消失和數量不足。
+## Author: wanghwplus
+## Version: 1.0.0
+## X-License: GPL-2.0-or-later
+## SavedVariables: RoguePoisonDB
+## IconTexture: Interface\Icons\Trade_BrewPoison
+
+Libs\LibStub\LibStub.lua
+Libs\CallbackHandler-1.0\CallbackHandler-1.0.xml
+Libs\AceDB-3.0\AceDB-3.0.xml
+Libs\AceDBOptions-3.0\AceDBOptions-3.0.xml
+Libs\AceGUI-3.0\AceGUI-3.0.xml
+Libs\AceConfig-3.0\AceConfig-3.0.xml
+Libs\LibDataBroker-1.1\LibDataBroker-1.1.lua
+Libs\LibDBIcon-1.0\LibDBIcon-1.0.lua
+
+Locales\Locales.lua
+Locales\enUS.lua
+Locales\zhCN.lua
+Locales\zhTW.lua
+
+Data\Poisons.lua
+
+Init.lua
+Config.lua
+
+Modules\PoisonBar.lua
+
+Options.lua
