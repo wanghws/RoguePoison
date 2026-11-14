@@ -6,7 +6,7 @@
 ## Notes-zhCN: WoW Forever 盗贼毒药栏:点击涂抹毒药和磨刀石,提示毒药即将消失和数量不足。
 ## Notes-zhTW: WoW Forever 盜賊毒藥欄:點擊塗抹毒藥和磨刀石,提示毒藥即將消失和數量不足。
 ## Author: wanghwplus
-## Version: 1.0.0
+## Version: 1.1.0
 ## X-License: GPL-2.0-or-later
 ## SavedVariables: RoguePoisonDB
 ## IconTexture: Interface\AddOns\RoguePoison\Media\icon
