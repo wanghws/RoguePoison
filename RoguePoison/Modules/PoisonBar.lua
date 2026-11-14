@@ -10,12 +10,13 @@ local WEAPON_CLASS = Enum.ItemClass.Weapon
 local VANISH_RANKS = { 1856, 1857 }
 local FALLBACK_ICON = 134400
 local TICK_SECONDS = 1
+local SMALL_TEXT_SCALE = 0.75
 
-local container, mover, warning
+local container, mover, flashIcon
 local buttons = {}
 local entries = {}
-local shortages = {}
 local needsPoison = false
+local flashTracked = false
 local pendingSecure = false
 
 local function Readable(v)
@@ -24,6 +25,10 @@ end
 
 local function Count(itemID)
     return C_Item.GetItemCount(itemID) or 0
+end
+
+local function IsLow(db, count, threshold)
+    return db.showWarnings and count < threshold
 end
 
 local function HasWeapon(slot)
@@ -59,10 +64,8 @@ local function FormatTime(ms)
     return ("%d:%02d"):format(math.floor(secs / 60), secs % 60)
 end
 
-local function ItemLabel(itemID)
-    local name = C_Item.GetItemNameByID(itemID)
-    if not name then C_Item.RequestLoadItemDataByID(itemID) end
-    return ("|T%s:0|t%s"):format(C_Item.GetItemIconByID(itemID) or FALLBACK_ICON, name or "")
+local function SmallFontSize(db)
+    return math.max(8, math.floor(db.fontSize * SMALL_TEXT_SCALE))
 end
 
 local function ApplyFont(fontString, size)
@@ -94,14 +97,63 @@ local function ButtonOnEnter(self)
     GameTooltip:AddLine(" ")
     AddSlotLine(L["TIP_MAIN_HAND"], MAIN_HAND)
     if hasOffHand then AddSlotLine(L["TIP_OFF_HAND"], OFF_HAND) end
-    GameTooltip:AddLine(" ")
-    GameTooltip:AddLine(L["TIP_LEFT_CLICK"], 0.3, 1, 0.3)
-    if hasOffHand then GameTooltip:AddLine(L["TIP_RIGHT_CLICK"], 0.3, 1, 0.3) end
+    if Count(self.itemID) > 0 then
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine(L["TIP_LEFT_CLICK"], 0.3, 1, 0.3)
+        if hasOffHand then GameTooltip:AddLine(L["TIP_RIGHT_CLICK"], 0.3, 1, 0.3) end
+    end
     GameTooltip:Show()
 end
 
-local function ButtonOnLeave()
+local function FlashOnEnter(self)
+    GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+    GameTooltip:SetItemByID(ns.ITEM.FLASH_POWDER)
+    GameTooltip:Show()
+end
+
+local function IconOnLeave()
     GameTooltip:Hide()
+end
+
+local function DecorateIcon(f)
+    local bg = f:CreateTexture(nil, "BACKGROUND")
+    bg:SetPoint("TOPLEFT", -1, 1)
+    bg:SetPoint("BOTTOMRIGHT", 1, -1)
+    bg:SetColorTexture(0, 0, 0, 0.85)
+
+    f.icon = f:CreateTexture(nil, "ARTWORK")
+    f.icon:SetAllPoints()
+    f.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+
+    f.count = f:CreateFontString(nil, "OVERLAY")
+    f.count:SetPoint("BOTTOMRIGHT", -2, 2)
+
+    f.low = f:CreateFontString(nil, "OVERLAY")
+    f.low:SetPoint("TOP", f, "BOTTOM", 0, -3)
+    f.low:SetJustifyH("CENTER")
+    f.low:SetWordWrap(true)
+    f.low:SetTextColor(1, 0.3, 0.3)
+end
+
+local function PlaceIcon(f, index, size, spacing)
+    f:SetSize(size, size)
+    f:ClearAllPoints()
+    f:SetPoint("LEFT", container, "LEFT", (index - 1) * (size + spacing), 0)
+    f.low:SetWidth(size + spacing)
+end
+
+local function PaintIcon(f, count, threshold, db)
+    local low = IsLow(db, count, threshold)
+    ApplyFont(f.count, db.fontSize)
+    f.count:SetText(count)
+    if low then
+        f.count:SetTextColor(1, 0.3, 0.3)
+    else
+        f.count:SetTextColor(1, 1, 1)
+    end
+    f.icon:SetDesaturated(count == 0)
+    ApplyFont(f.low, SmallFontSize(db))
+    f.low:SetText(low and L["WARN_LOW_STOCK"] or "")
 end
 
 local function GetButton(index)
@@ -109,24 +161,21 @@ local function GetButton(index)
     if b then return b end
     b = CreateFrame("Button", nil, container, "SecureActionButtonTemplate")
     b:RegisterForClicks("LeftButtonDown", "LeftButtonUp", "RightButtonDown", "RightButtonUp")
-
-    local bg = b:CreateTexture(nil, "BACKGROUND")
-    bg:SetPoint("TOPLEFT", -1, 1)
-    bg:SetPoint("BOTTOMRIGHT", 1, -1)
-    bg:SetColorTexture(0, 0, 0, 0.85)
-
-    b.icon = b:CreateTexture(nil, "ARTWORK")
-    b.icon:SetAllPoints()
-    b.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
-
-    b.count = b:CreateFontString(nil, "OVERLAY")
-    b.count:SetPoint("BOTTOMRIGHT", -2, 2)
-
+    DecorateIcon(b)
     b:SetHighlightTexture([[Interface\Buttons\ButtonHilight-Square]], "ADD")
     b:SetScript("OnEnter", ButtonOnEnter)
-    b:SetScript("OnLeave", ButtonOnLeave)
+    b:SetScript("OnLeave", IconOnLeave)
     buttons[index] = b
     return b
+end
+
+local function SetClickActions(b, itemID, offHand)
+    local usable = Count(itemID) > 0
+    b:SetAttribute("type1", usable and "macro" or nil)
+    b:SetAttribute("macrotext1", usable and ("/use item:%d\n/use %d"):format(itemID, MAIN_HAND) or nil)
+    local usableOffHand = usable and offHand
+    b:SetAttribute("type2", usableOffHand and "macro" or nil)
+    b:SetAttribute("macrotext2", usableOffHand and ("/use item:%d\n/use %d"):format(itemID, OFF_HAND) or nil)
 end
 
 local function SaveAnchor()
@@ -149,6 +198,18 @@ local function CreateFrames()
     container:SetDontSavePosition(true)
     container:Hide()
 
+    container.hint = container:CreateFontString(nil, "OVERLAY")
+    container.hint:SetPoint("BOTTOM", container, "TOP", 0, 3)
+    container.hint:SetTextColor(0.9, 0.9, 0.9)
+
+    flashIcon = CreateFrame("Frame", addonName .. "FlashPowder", container)
+    DecorateIcon(flashIcon)
+    flashIcon.icon:SetTexture(C_Item.GetItemIconByID(ns.ITEM.FLASH_POWDER) or FALLBACK_ICON)
+    flashIcon:EnableMouse(true)
+    flashIcon:SetScript("OnEnter", FlashOnEnter)
+    flashIcon:SetScript("OnLeave", IconOnLeave)
+    flashIcon:Hide()
+
     mover = CreateFrame("Frame", nil, container)
     mover:SetAllPoints()
     mover:SetFrameLevel(container:GetFrameLevel() + 20)
@@ -168,13 +229,6 @@ local function CreateFrames()
         SaveAnchor()
     end)
     mover:Hide()
-
-    warning = CreateFrame("Frame", nil, combatHider)
-    warning:SetSize(1, 1)
-    warning:SetPoint("TOP", container, "BOTTOM", 0, -6)
-    warning.text = warning:CreateFontString(nil, "OVERLAY")
-    warning.text:SetPoint("TOP")
-    warning:Hide()
 end
 
 local function ResolveRank(poison, seen)
@@ -191,39 +245,21 @@ local function ResolveRank(poison, seen)
     return seenIndex and seenItem or nil
 end
 
-local function AddShortage(itemID, threshold)
-    local count = Count(itemID)
-    if count < threshold then
-        shortages[#shortages + 1] = { itemID = itemID, count = count }
-    end
-end
-
 function M:Scan()
     local db, seen = ns.db.profile, ns.db.char.seen
     wipe(entries)
-    wipe(shortages)
     for _, poison in ipairs(ns.POISON_TYPES) do
         if db.poisons[poison.key] then
             local itemID = ResolveRank(poison, seen)
-            if itemID then
-                entries[#entries + 1] = { itemID = itemID, count = Count(itemID) }
-                AddShortage(itemID, db.poisonThreshold)
-            end
+            if itemID then entries[#entries + 1] = itemID end
         end
     end
-    if db.trackFlash and KnowsVanish() then
-        AddShortage(ns.ITEM.FLASH_POWDER, db.flashThreshold)
-    end
+    flashTracked = db.trackFlash and KnowsVanish()
 end
 
 function M:EvaluateNeeds()
     local db = ns.db.profile
     needsPoison = SlotNeedsPoison(MAIN_HAND, db) or SlotNeedsPoison(OFF_HAND, db)
-end
-
-local function ShouldShow(db, shownCount)
-    if not db.enabled or shownCount == 0 then return false end
-    return not db.locked or needsPoison
 end
 
 function M:ApplySecure()
@@ -236,15 +272,18 @@ function M:ApplySecure()
     local db = ns.db.profile
     local anchor = db.anchor
     local size, spacing = db.iconSize, db.spacing
-    local offHandMacro = HasWeapon(OFF_HAND)
+    local offHand = HasWeapon(OFF_HAND)
     local preview = not db.locked
 
     container:ClearAllPoints()
     container:SetPoint(anchor.point, UIParent, anchor.relativePoint, anchor.x, anchor.y)
 
     local items = {}
-    for _, entry in ipairs(entries) do
-        if entry.count > 0 or preview then items[#items + 1] = entry.itemID end
+    for _, itemID in ipairs(entries) do
+        local count = Count(itemID)
+        if preview or IsLow(db, count, db.poisonThreshold) or (needsPoison and count > 0) then
+            items[#items + 1] = itemID
+        end
     end
     if preview and #items == 0 then
         for _, poison in ipairs(ns.POISON_TYPES) do
@@ -252,66 +291,49 @@ function M:ApplySecure()
         end
     end
 
-    local shownCount = #items
+    local hasUsable = false
     for i, itemID in ipairs(items) do
+        if Count(itemID) > 0 then hasUsable = true end
         local b = GetButton(i)
-        b:SetSize(size, size)
-        b:ClearAllPoints()
-        b:SetPoint("LEFT", container, "LEFT", (i - 1) * (size + spacing), 0)
-        b:SetAttribute("type1", "macro")
-        b:SetAttribute("macrotext1", ("/use item:%d\n/use %d"):format(itemID, MAIN_HAND))
-        if offHandMacro then
-            b:SetAttribute("type2", "macro")
-            b:SetAttribute("macrotext2", ("/use item:%d\n/use %d"):format(itemID, OFF_HAND))
-        else
-            b:SetAttribute("type2", nil)
-            b:SetAttribute("macrotext2", nil)
-        end
+        PlaceIcon(b, i, size, spacing)
+        SetClickActions(b, itemID, offHand)
         b.itemID = itemID
         b.icon:SetTexture(C_Item.GetItemIconByID(itemID) or FALLBACK_ICON)
         b:Show()
     end
-    for i = shownCount + 1, #buttons do
+    for i = #items + 1, #buttons do
         buttons[i].itemID = nil
         buttons[i]:Hide()
     end
 
+    local shownCount = #items
+    local flashCount = Count(ns.ITEM.FLASH_POWDER)
+    local showFlash = flashTracked and (preview or IsLow(db, flashCount, db.flashThreshold))
+    if showFlash then
+        shownCount = shownCount + 1
+        PlaceIcon(flashIcon, shownCount, size, spacing)
+    end
+    flashIcon:SetShown(showFlash)
+
     local width = math.max(shownCount, 1) * size + math.max(shownCount - 1, 0) * spacing
     container:SetSize(width, size)
+    ApplyFont(container.hint, SmallFontSize(db))
+    if preview or not hasUsable then
+        container.hint:SetText("")
+    else
+        container.hint:SetText(offHand and L["HINT_CLICK_BOTH"] or L["HINT_CLICK_MAIN"])
+    end
     mover.label:SetText(L["MOVER_LABEL"])
     mover:SetShown(preview and db.enabled)
-    container:SetShown(ShouldShow(db, shownCount))
-    self.shownCount = shownCount
+    container:SetShown(db.enabled and shownCount > 0)
 end
 
 function M:UpdateTexts()
     local db = ns.db.profile
     for _, b in ipairs(buttons) do
-        if b.itemID then
-            local count = Count(b.itemID)
-            ApplyFont(b.count, db.fontSize)
-            b.count:SetText(count)
-            if count < db.poisonThreshold then
-                b.count:SetTextColor(1, 0.3, 0.3)
-            else
-                b.count:SetTextColor(1, 1, 1)
-            end
-            b.icon:SetDesaturated(count == 0)
-        end
+        if b.itemID then PaintIcon(b, Count(b.itemID), db.poisonThreshold, db) end
     end
-
-    if not (db.enabled and db.showWarnings and #shortages > 0) then
-        warning:Hide()
-        return
-    end
-    local parts = {}
-    for _, s in ipairs(shortages) do
-        parts[#parts + 1] = ("%s |cffff5555%d|r"):format(ItemLabel(s.itemID), s.count)
-    end
-    ApplyFont(warning.text, db.fontSize)
-    warning.text:SetTextColor(1, 0.82, 0)
-    warning.text:SetText(L["WARN_LOW_STOCK"] .. " " .. table.concat(parts, "   "))
-    warning:Show()
+    PaintIcon(flashIcon, Count(ns.ITEM.FLASH_POWDER), db.flashThreshold, db)
 end
 
 function M:Refresh()
@@ -326,11 +348,8 @@ function M:OnTick()
     local before = needsPoison
     self:EvaluateNeeds()
     if before == needsPoison then return end
-    if InCombatLockdown() then
-        pendingSecure = true
-        return
-    end
-    container:SetShown(ShouldShow(ns.db.profile, self.shownCount or 0))
+    self:ApplySecure()
+    self:UpdateTexts()
 end
 
 function M:OnPlayerLogin()
@@ -343,12 +362,9 @@ function M:OnPlayerLogin()
     events:RegisterEvent("WEAPON_ENCHANT_CHANGED")
     events:RegisterEvent("PLAYER_REGEN_ENABLED")
     events:RegisterEvent("SPELLS_CHANGED")
-    events:RegisterEvent("GET_ITEM_INFO_RECEIVED")
     events:SetScript("OnEvent", function(_, event)
         if event == "WEAPON_ENCHANT_CHANGED" then
             M:OnTick()
-        elseif event == "GET_ITEM_INFO_RECEIVED" then
-            M:UpdateTexts()
         elseif event == "PLAYER_REGEN_ENABLED" then
             if pendingSecure then M:Refresh() end
         else

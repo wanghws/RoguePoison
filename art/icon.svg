@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="55%" r="70%">
+      <stop offset="0" stop-color="#2c3d30"/>
+      <stop offset="0.55" stop-color="#162119"/>
+      <stop offset="1" stop-color="#080b09"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#7dff6a" stop-opacity="0.55"/>
+      <stop offset="0.45" stop-color="#3fd14a" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#3fd14a" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="frame" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#c9a85a"/>
+      <stop offset="0.5" stop-color="#6b5428"/>
+      <stop offset="1" stop-color="#c9a85a"/>
+    </linearGradient>
+    <linearGradient id="steel" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#f4f8fa"/>
+      <stop offset="0.48" stop-color="#c9d3d8"/>
+      <stop offset="0.52" stop-color="#8e9ca3"/>
+      <stop offset="1" stop-color="#5d6a70"/>
+    </linearGradient>
+    <linearGradient id="venom" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#b8ff8a"/>
+      <stop offset="0.45" stop-color="#5fe04f"/>
+      <stop offset="0.55" stop-color="#2fae35"/>
+      <stop offset="1" stop-color="#1a7a26"/>
+    </linearGradient>
+    <linearGradient id="drop" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#c8ff9a"/>
+      <stop offset="0.5" stop-color="#4fd447"/>
+      <stop offset="1" stop-color="#16701f"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f6dc8c"/>
+      <stop offset="0.5" stop-color="#c79a3e"/>
+      <stop offset="1" stop-color="#7a5a20"/>
+    </linearGradient>
+    <linearGradient id="grip" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#6b4a32"/>
+      <stop offset="0.5" stop-color="#4a3122"/>
+      <stop offset="1" stop-color="#2a1b12"/>
+    </linearGradient>
+    <clipPath id="bladeClip">
+      <path d="M466 372 L558 372 L550 690 L512 880 L474 690 Z"/>
+    </clipPath>
+    <clipPath id="badge">
+      <rect x="32" y="32" width="960" height="960" rx="170"/>
+    </clipPath>
+  </defs>
+
+  <rect x="32" y="32" width="960" height="960" rx="170" fill="url(#bg)"/>
+  <g clip-path="url(#badge)">
+    <circle cx="600" cy="640" r="380" fill="url(#glow)"/>
+  </g>
+  <rect x="44" y="44" width="936" height="936" rx="160" fill="none" stroke="url(#frame)" stroke-width="20"/>
+  <rect x="68" y="68" width="888" height="888" rx="140" fill="none" stroke="#000" stroke-opacity="0.45" stroke-width="6"/>
+
+  <g transform="translate(512 500) scale(1.1) translate(-512 -500) translate(-40 -50) rotate(-40 512 510)">
+    <g fill="#000" fill-opacity="0.35" transform="translate(14 18)">
+      <circle cx="512" cy="150" r="40"/>
+      <rect x="480" y="186" width="64" height="150" rx="14"/>
+      <path d="M346 336 Q512 380 678 336 L686 372 Q512 410 338 372 Z"/>
+      <path d="M466 372 L558 372 L550 690 L512 880 L474 690 Z"/>
+    </g>
+    <path d="M466 372 L558 372 L550 690 L512 880 L474 690 Z" fill="url(#steel)" stroke="#2b3236" stroke-width="8" stroke-linejoin="round"/>
+    <path d="M512 392 L512 760" stroke="#6f7d84" stroke-width="10" stroke-linecap="round"/>
+    <g clip-path="url(#bladeClip)">
+      <path d="M440 585 Q462 560 484 590 Q500 612 512 575 Q526 545 540 590 Q552 620 566 580 L600 900 L420 900 Z" fill="url(#venom)"/>
+      <path d="M478 600 Q486 640 482 668 Q478 690 470 676 Z" fill="#d6ffb8" fill-opacity="0.6"/>
+    </g>
+    <path d="M466 372 L558 372 L550 690 L512 880 L474 690 Z" fill="none" stroke="#1d2a1f" stroke-width="8" stroke-linejoin="round"/>
+    <path d="M346 336 Q512 380 678 336 L686 372 Q512 410 338 372 Z" fill="url(#gold)" stroke="#3d2c0e" stroke-width="8" stroke-linejoin="round"/>
+    <circle cx="338" cy="354" r="22" fill="url(#gold)" stroke="#3d2c0e" stroke-width="7"/>
+    <circle cx="686" cy="354" r="22" fill="url(#gold)" stroke="#3d2c0e" stroke-width="7"/>
+    <rect x="480" y="186" width="64" height="150" rx="14" fill="url(#grip)" stroke="#1c120b" stroke-width="7"/>
+    <path d="M482 214 L542 232 M482 248 L542 266 M482 282 L542 300 M482 316 L542 330" stroke="#a07a52" stroke-width="7" stroke-linecap="round" opacity="0.8"/>
+    <circle cx="512" cy="150" r="40" fill="url(#gold)" stroke="#3d2c0e" stroke-width="8"/>
+    <circle cx="512" cy="150" r="15" fill="#3fd14a" stroke="#1a4d1f" stroke-width="5"/>
+    <circle cx="507" cy="145" r="5" fill="#e9ffd9"/>
+  </g>
+
+  <g>
+    <path d="M730 812 C730 812 688 866 688 896 C688 922 707 940 730 940 C753 940 772 922 772 896 C772 866 730 812 730 812 Z" fill="url(#drop)" stroke="#0f3d14" stroke-width="7"/>
+    <ellipse cx="715" cy="894" rx="9" ry="15" fill="#f0ffe4" opacity="0.85"/>
+  </g>
+</svg>

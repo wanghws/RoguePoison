@@ -154,34 +154,61 @@ fire("PLAYER_LOGIN")
 check(ns.active, "active for rogue")
 fire("PLAYER_ENTERING_WORLD")
 bar = _G.RoguePoisonBar
+local flash = _G.RoguePoisonFlashPowder
+
+local function poisonButtons()
+  local list = {}
+  for _, f in ipairs(frames) do
+    if rawget(f, "_protected") and rawget(f, "low") and rawget(f, "_shown") then list[#list+1] = f end
+  end
+  return list
+end
+local function shownItems()
+  local ids = {}
+  for _, f in ipairs(poisonButtons()) do ids[#ids+1] = tostring(rawget(f, "itemID")) end
+  if flash._shown then ids[#ids+1] = "flash" end
+  return table.concat(ids, ",")
+end
+local function buttonFor(itemID)
+  for _, f in ipairs(poisonButtons()) do if rawget(f, "itemID") == itemID then return f end end
+end
 
 check(bar._shown, "bar shown when weapons have no poison")
-local btns = {}
-for _, f in ipairs(frames) do if f._attr.type1 then btns[#btns+1] = f end end
-check(#btns == 3, "three buttons (instant, deadly, sharpening stone)")
-check(btns[3]._attr.macrotext1 == "/use item:18262\n/use 16", "sharpening stone picks elemental over dense")
-check(btns[1]._attr.macrotext1 == "/use item:8928\n/use 16", "left click macro main hand: " .. btns[1]._attr.macrotext1)
-check(btns[1]._attr.macrotext2 == "/use item:8928\n/use 17", "right click macro off hand")
-check(btns[2]._attr.macrotext1 == "/use item:8985\n/use 16", "deadly V macro")
-local warnText
-for _, f in ipairs(frames) do local t = rawget(f, "text"); if t and t._text then warnText = t._text end end
-print("warning: " .. tostring(warnText))
-check(warnText and warnText:find("Item8985") and warnText:find("Item5140"), "warns deadly, flash powder")
-check(not warnText:find("Item8925") and not warnText:find("Item5173") and not warnText:find("Item8924"), "no reagent warnings")
-check(not warnText:find("Item8928 ") and not warnText:find("Item18262"), "no warning for stocked items")
+check(shownItems() == "8928,8985,18262,flash", "instant, deadly, sharpening stone, low flash powder: " .. shownItems())
+check(buttonFor(8928)._attr.macrotext1 == "/use item:8928\n/use 16", "left click macro main hand")
+check(buttonFor(8928)._attr.macrotext2 == "/use item:8928\n/use 17", "right click macro off hand")
+check(buttonFor(8985)._attr.macrotext1 == "/use item:8985\n/use 16", "deadly V macro")
+check(buttonFor(18262)._attr.macrotext1 == "/use item:18262\n/use 16", "sharpening stone picks elemental over dense")
+check(buttonFor(8985).low._text == "数量不足", "low label under deadly poison")
+check(buttonFor(8985).count._text == 5 and buttonFor(8985).count._color[2] == 0.3, "deadly count in red")
+check(buttonFor(8928).low._text == "" and buttonFor(18262).low._text == "", "no label under stocked items")
+check(flash.low._text == "数量不足", "low label under flash powder")
+check(flash.count._text == 2 and flash.count._color[2] == 0.3, "flash powder shows owned count in red")
+check(flash._point[4] == 120, "flash powder icon after the poison buttons")
+check(bar.hint._text == "左键主手,右键副手", "click hint above the icons")
 
 enchants[16] = { remainingTimeMs = 30 * 60000, chargesRemaining = 50 }
 enchants[17] = { remainingTimeMs = 25 * 60000, chargesRemaining = 40 }
 tick()
-check(not bar._shown, "bar hidden when both weapons poisoned")
+check(bar._shown and shownItems() == "8985,flash", "only low items shown when weapons poisoned: " .. shownItems())
+check(flash._point[4] == 40, "flash powder icon follows the low poison")
+bags[5140] = 20
+bags[8985] = 20
+fire("BAG_UPDATE_DELAYED")
+check(not bar._shown, "bar hidden when weapons poisoned and stock is fine")
 
 enchants[17] = { remainingTimeMs = 25 * 60000, chargesRemaining = 8 }
 tick()
-check(bar._shown, "bar shown when off hand charges < 10")
+check(bar._shown and shownItems() == "8928,8985,18262", "bar shown when off hand charges < 10")
 
 enchants[17] = { remainingTimeMs = 25 * 60000, chargesRemaining = 40 }
 tick()
 check(not bar._shown, "hidden again")
+bags[5140] = 2
+fire("BAG_UPDATE_DELAYED")
+check(bar._shown and shownItems() == "flash" and bar.hint._text == "", "no click hint when only flash powder shows")
+bags[5140] = 20
+fire("BAG_UPDATE_DELAYED")
 
 setCombat(true)
 fire("PLAYER_REGEN_DISABLED")
@@ -195,19 +222,21 @@ check(not visible(bar), "bar hidden by combat driver")
 setCombat(false)
 fire("PLAYER_REGEN_ENABLED")
 check(bar._shown and visible(bar), "bar shown after combat when main hand < 10m")
-local visible = 0
-for _, f in ipairs(btns) do if f._shown then visible = visible + 1 end end
-check(visible == 2, "instant hidden after running out, deadly and stone remain")
-for _, f in ipairs(frames) do local t = rawget(f, "text"); if t and t._text then warnText = t._text end end
-check(warnText:find("Item8928") ~= nil, "warns instant VI at 0 (remembered)")
+local instant = buttonFor(8928)
+check(instant ~= nil and instant.count._text == 0 and instant.icon._desat, "instant VI at 0 stays as grey icon (remembered)")
+check(instant.low._text == "数量不足", "low label under empty instant poison")
+check(instant._attr.type1 == nil and instant._attr.type2 == nil, "no click action without the item")
 
 equipped[17] = nil
 fire("PLAYER_EQUIPMENT_CHANGED")
-check(btns[1]._attr.type2 == nil, "no right-click action without off hand weapon")
+check(buttonFor(8985)._attr.type2 == nil, "no right-click action without off hand weapon")
+check(bar.hint._text == "左键主手", "click hint drops off hand without off hand weapon")
 
 ns.db.profile.locked = false
 ns:RefreshAll()
 check(bar._shown, "unlocked shows bar")
+check(bar.hint._text == "", "no click hint while unlocked")
+check(flash._shown, "unlocked previews flash powder icon")
 ns:OpenOptions("checks")
 check(ns._optionsFrame ~= nil, "options open")
 setCombat(true)
@@ -220,21 +249,30 @@ fire("PLAYER_REGEN_ENABLED")
 check(ns._optionsFrame ~= nil and ns._optionsTab.localstatus.selected == "checks", "options reopen on same tab after combat")
 check(ns.db.profile.locked == false, "unlock state restored after combat")
 local L = ns.L
-check(ns.db.global.locale == "auto" and L["WARN_LOW_STOCK"] == "数量不足:", "auto follows zhCN client")
+check(ns.db.global.locale == "auto" and L["WARN_LOW_STOCK"] == "数量不足", "auto follows zhCN client")
 local moverLabel
 for _, f in ipairs(frames) do local lbl = rawget(f, "label"); if lbl then moverLabel = lbl end end
 ns:SetLanguage("enUS")
-check(L["WARN_LOW_STOCK"] == "Low stock:", "switch to English")
+check(L["WARN_LOW_STOCK"] == "Low stock", "switch to English")
 check(moverLabel._text == "Drag to move", "mover label relocalized")
+ns.db.profile.locked = true
+ns:RefreshAll()
+check(bar.hint._text == "Left: main hand", "click hint relocalized")
+ns.db.profile.locked = false
+ns:RefreshAll()
 for _, fn in ipairs(deferred) do fn() end
 ns:SetLanguage("zhTW")
-check(L["WARN_LOW_STOCK"] == "數量不足:", "switch to Traditional Chinese")
+check(L["WARN_LOW_STOCK"] == "數量不足", "switch to Traditional Chinese")
 clientLocale = "deDE"
 ns:SetLanguage("auto")
-check(L["WARN_LOW_STOCK"] == "Low stock:", "unsupported client falls back to English")
+check(L["WARN_LOW_STOCK"] == "Low stock", "unsupported client falls back to English")
 check(L["NO_SUCH_KEY"] == "NO_SUCH_KEY", "missing key returns key")
 clientLocale = "zhCN"
 ns:SetLanguage("auto")
+knownSpells[1856] = nil
+bags[5140] = 1
+fire("SPELLS_CHANGED")
+check(not flash._shown, "no flash powder icon before Vanish is learned")
 ns.db.profile.enabled = false
 ns:RefreshAll()
 check(not bar._shown, "disabled hides bar")

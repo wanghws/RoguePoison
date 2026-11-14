@@ -9,7 +9,7 @@
 ## Version: 1.0.0
 ## X-License: GPL-2.0-or-later
 ## SavedVariables: RoguePoisonDB
-## IconTexture: Interface\Icons\Trade_BrewPoison
+## IconTexture: Interface\AddOns\RoguePoison\Media\icon
 
 Libs\LibStub\LibStub.lua
 Libs\CallbackHandler-1.0\CallbackHandler-1.0.xml

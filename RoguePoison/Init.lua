@@ -4,7 +4,7 @@ _G.RoguePoison = ns
 ns.name    = addonName
 ns.version = C_AddOns.GetAddOnMetadata(addonName, "Version") or "0.0.0"
 ns.modules = {}
-ns.ICON    = [[Interface\Icons\Trade_BrewPoison]]
+ns.ICON    = [[Interface\AddOns\RoguePoison\Media\icon]]
 
 local CHAT_PREFIX = "|cff6fdc6f" .. addonName .. "|r: "
 
