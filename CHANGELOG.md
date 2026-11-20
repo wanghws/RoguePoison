@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.1.0
+
+- Added a live countdown (`4:59`) under the bar for each weapon whose remaining
+  poison time drops below the threshold (positioned below "Low stock" labels
+  when present). Added Blinding Powder low-stock tracking after learning Blind,
+  with its own toggle and threshold in settings.
+- 武器毒药剩余时间低于设定阈值时，在图标栏下方显示各到期武器的实时倒计时（如
+  `主手 4:59`），有「数量不足」提示时自动顺延在其下方；新增「致盲粉」库存检查
+  （学会致盲后生效），并在设置中提供独立开关和数量阈值。
+
 ## v1.0.0
 
 - First public release for Rogues on WoW Forever. A poison and sharpening stone

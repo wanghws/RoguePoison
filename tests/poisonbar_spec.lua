@@ -155,6 +155,7 @@ check(ns.active, "active for rogue")
 fire("PLAYER_ENTERING_WORLD")
 bar = _G.RoguePoisonBar
 local flash = _G.RoguePoisonFlashPowder
+local blind = _G.RoguePoisonBlindingPowder
 
 local function poisonButtons()
   local list = {}
@@ -167,6 +168,7 @@ local function shownItems()
   local ids = {}
   for _, f in ipairs(poisonButtons()) do ids[#ids+1] = tostring(rawget(f, "itemID")) end
   if flash._shown then ids[#ids+1] = "flash" end
+  if blind._shown then ids[#ids+1] = "blind" end
   return table.concat(ids, ",")
 end
 local function buttonFor(itemID)
@@ -186,6 +188,8 @@ check(flash.low._text == "数量不足", "low label under flash powder")
 check(flash.count._text == 2 and flash.count._color[2] == 0.3, "flash powder shows owned count in red")
 check(flash._point[4] == 120, "flash powder icon after the poison buttons")
 check(bar.hint._text == "左键主手,右键副手", "click hint above the icons")
+check(bar.timer._text == "", "no countdown when weapons have no poison")
+check(not blind._shown, "no blinding powder icon before Blind is learned")
 
 enchants[16] = { remainingTimeMs = 30 * 60000, chargesRemaining = 50 }
 enchants[17] = { remainingTimeMs = 25 * 60000, chargesRemaining = 40 }
@@ -197,9 +201,46 @@ bags[8985] = 20
 fire("BAG_UPDATE_DELAYED")
 check(not bar._shown, "bar hidden when weapons poisoned and stock is fine")
 
+knownSpells[2094] = true
+bags[5530] = 3
+fire("SPELLS_CHANGED")
+check(bar._shown and shownItems() == "blind", "blinding powder shown when Blind learned and stock low: " .. shownItems())
+check(blind.low._text == "数量不足", "low label under blinding powder")
+check(blind.count._text == 3 and blind.count._color[2] == 0.3, "blinding powder count in red")
+check(bar.hint._text == "", "no click hint when only blinding powder shows")
+bags[5140] = 2
+fire("BAG_UPDATE_DELAYED")
+check(shownItems() == "flash,blind" and blind._point[4] == 40, "blinding powder follows flash powder")
+ns.db.profile.trackBlind = false
+ns:RefreshAll()
+check(shownItems() == "flash", "untracked blinding powder hidden")
+ns.db.profile.trackBlind = true
+bags[5140] = 20
+bags[5530] = 20
+ns:RefreshAll()
+check(not bar._shown, "hidden when flash and blinding powder stocked")
+
+enchants[16] = { remainingTimeMs = 4 * 60000 + 59 * 1000, chargesRemaining = 50 }
+tick()
+check(bar._shown and bar.timer._text == "主手 4:59", "countdown shows main hand 4:59: " .. tostring(bar.timer._text))
+check(bar.timer._point[5] == -3, "countdown right below bar when no low-stock label")
+enchants[16] = { remainingTimeMs = 4 * 60000 + 58 * 1000, chargesRemaining = 50 }
+tick()
+check(bar.timer._text == "主手 4:58", "countdown ticks down while needsPoison stays true: " .. tostring(bar.timer._text))
+enchants[17] = { remainingTimeMs = 3 * 60000 + 12 * 1000, chargesRemaining = 40 }
+tick()
+check(bar.timer._text == "主手 4:58  副手 3:12", "countdown lists both expiring hands: " .. tostring(bar.timer._text))
+enchants[16] = { remainingTimeMs = 30 * 60000, chargesRemaining = 50 }
+fire("WEAPON_ENCHANT_CHANGED")
+check(bar.timer._text == "副手 3:12", "re-poisoned main hand leaves off hand countdown: " .. tostring(bar.timer._text))
+enchants[17] = { remainingTimeMs = 25 * 60000, chargesRemaining = 40 }
+tick()
+check(not bar._shown and bar.timer._text == "", "countdown clears when weapons poisoned")
+
 enchants[17] = { remainingTimeMs = 25 * 60000, chargesRemaining = 8 }
 tick()
 check(bar._shown and shownItems() == "8928,8985,18262", "bar shown when off hand charges < 10")
+check(bar.timer._text == "", "no countdown when triggered only by low charges")
 
 enchants[17] = { remainingTimeMs = 25 * 60000, chargesRemaining = 40 }
 tick()
@@ -222,6 +263,8 @@ check(not visible(bar), "bar hidden by combat driver")
 setCombat(false)
 fire("PLAYER_REGEN_ENABLED")
 check(bar._shown and visible(bar), "bar shown after combat when main hand < 10m")
+check(bar.timer._text == "主手 9:00", "countdown active after combat: " .. tostring(bar.timer._text))
+check(bar.timer._point[5] < -3, "countdown shifts below low-stock label when low item shown")
 local instant = buttonFor(8928)
 check(instant ~= nil and instant.count._text == 0 and instant.icon._desat, "instant VI at 0 stays as grey icon (remembered)")
 check(instant.low._text == "数量不足", "low label under empty instant poison")
@@ -236,7 +279,8 @@ ns.db.profile.locked = false
 ns:RefreshAll()
 check(bar._shown, "unlocked shows bar")
 check(bar.hint._text == "", "no click hint while unlocked")
-check(flash._shown, "unlocked previews flash powder icon")
+check(bar.timer._text == "", "no countdown while unlocked")
+check(flash._shown and blind._shown, "unlocked previews flash and blinding powder icons")
 ns:OpenOptions("checks")
 check(ns._optionsFrame ~= nil, "options open")
 setCombat(true)
@@ -258,6 +302,7 @@ check(moverLabel._text == "Drag to move", "mover label relocalized")
 ns.db.profile.locked = true
 ns:RefreshAll()
 check(bar.hint._text == "Left: main hand", "click hint relocalized")
+check(bar.timer._text == "Main hand 9:00", "countdown relocalized: " .. tostring(bar.timer._text))
 ns.db.profile.locked = false
 ns:RefreshAll()
 for _, fn in ipairs(deferred) do fn() end
@@ -270,9 +315,11 @@ check(L["NO_SUCH_KEY"] == "NO_SUCH_KEY", "missing key returns key")
 clientLocale = "zhCN"
 ns:SetLanguage("auto")
 knownSpells[1856] = nil
+knownSpells[2094] = nil
 bags[5140] = 1
+bags[5530] = 1
 fire("SPELLS_CHANGED")
-check(not flash._shown, "no flash powder icon before Vanish is learned")
+check(not flash._shown and not blind._shown, "no reagent icons before spells are learned")
 ns.db.profile.enabled = false
 ns:RefreshAll()
 check(not bar._shown, "disabled hides bar")

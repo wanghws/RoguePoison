@@ -155,12 +155,18 @@ local function DrawChecksTab(container)
     AddCheckbox(container, L["OPT_TRACK_FLASH"],
         function() return db.trackFlash end,
         function(v) db.trackFlash = v end)
+    AddCheckbox(container, L["OPT_TRACK_BLIND"],
+        function() return db.trackBlind end,
+        function(v) db.trackBlind = v end)
     AddSlider(container, L["OPT_POISON_THRESHOLD"], 0, 100, 1,
         function() return db.poisonThreshold end,
         function(v) db.poisonThreshold = v end)
     AddSlider(container, L["OPT_FLASH_THRESHOLD"], 0, 100, 1,
         function() return db.flashThreshold end,
         function(v) db.flashThreshold = v end)
+    AddSlider(container, L["OPT_BLIND_THRESHOLD"], 0, 100, 1,
+        function() return db.blindThreshold end,
+        function(v) db.blindThreshold = v end)
 end
 
 local function DrawPoisonsTab(container)

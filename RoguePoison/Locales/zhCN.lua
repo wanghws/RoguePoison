@@ -30,6 +30,8 @@ L["OPT_SHOW_WARNINGS"]       = "库存不足时提示"
 L["OPT_POISON_THRESHOLD"]    = "毒药 / 磨刀石数量低于"
 L["OPT_FLASH_THRESHOLD"]     = "闪光粉数量低于"
 L["OPT_TRACK_FLASH"]         = "检查闪光粉"
+L["OPT_BLIND_THRESHOLD"]     = "致盲粉数量低于"
+L["OPT_TRACK_BLIND"]         = "检查致盲粉"
 L["OPT_POISONS_HELP"]        = "未勾选的项目不显示,也不检查库存。"
 
 L["ANCHOR_CENTER"]           = "中"

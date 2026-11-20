@@ -3,8 +3,9 @@
 WoW addon for **Rogues on WoW Forever** only. Shows a bar of the poisons in the
 player's bags plus sharpening stones (one icon per type, highest rank in
 bags, stack count on the icon). Left-click applies to the main hand,
-right-click to the off hand. Warns when poisons, sharpening stones or Flash
-Powder run low. Poison-crafting reagents are deliberately not tracked.
+right-click to the off hand. Warns when poisons, sharpening stones, Flash
+Powder or Blinding Powder run low. Poison-crafting reagents are deliberately
+not tracked.
 
 ## Target client
 
@@ -82,12 +83,18 @@ Libs → Locales → Data → `Init.lua` → `Config.lua` → Modules → `Optio
   low (count below `poisonThreshold`, 0 included), or when a weapon needs
   poison and the item is in the bags. A 0-count button is grey and has no
   click action.
-- The Flash Powder icon (not clickable, tooltip only) is appended last while
-  Flash Powder is tracked (`trackFlash` and Vanish known) and below
-  `flashThreshold`; unlocked mode previews it while tracked.
+- The Flash Powder and Blinding Powder icons (not clickable, tooltip only) are
+  appended last while tracked (`trackFlash` + Vanish known; `trackBlind` +
+  Blind known) and below their threshold (`flashThreshold` / `blindThreshold`);
+  unlocked mode previews them while tracked.
 - "Low" only applies with `showWarnings` on. A low icon gets a red count and
   the `WARN_LOW_STOCK` label right under it (no item list anywhere). The
   label is 75% of the count font size and wraps within icon size + spacing.
+- A live countdown (`container.timer`, same small font size, yellow) sits
+  centered under the bar (pushed below `WARN_LOW_STOCK` when any shown icon is
+  low) listing each weapon whose remaining time is below `timeThreshold`
+  (e.g. `Main hand 4:59  Off hand 3:12`). Empty while unlocked or when no weapon
+  is expiring.
 - A click hint sits above the bar (`HINT_CLICK_BOTH`, or `HINT_CLICK_MAIN`
   without an off-hand weapon), same small font size as the low label. It is
   empty while unlocked or when no shown button has the item in the bags.

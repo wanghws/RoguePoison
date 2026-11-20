@@ -7,16 +7,33 @@ ns:RegisterModule("poisonBar", M)
 local MAIN_HAND = INVSLOT_MAINHAND or 16
 local OFF_HAND  = INVSLOT_OFFHAND or 17
 local WEAPON_CLASS = Enum.ItemClass.Weapon
-local VANISH_RANKS = { 1856, 1857 }
 local FALLBACK_ICON = 134400
 local TICK_SECONDS = 1
 local SMALL_TEXT_SCALE = 0.75
 
-local container, mover, flashIcon
+local REAGENTS = {
+    {
+        name      = "FlashPowder",
+        itemID    = ns.ITEM.FLASH_POWDER,
+        spells    = { 1856, 1857 },
+        trackKey  = "trackFlash",
+        threshKey = "flashThreshold",
+    },
+    {
+        name      = "BlindingPowder",
+        itemID    = ns.ITEM.BLINDING_POWDER,
+        spells    = { 2094 },
+        trackKey  = "trackBlind",
+        threshKey = "blindThreshold",
+    },
+}
+
+local container, mover
 local buttons = {}
+local reagentIcons = {}
+local reagentTracked = {}
 local entries = {}
 local needsPoison = false
-local flashTracked = false
 local pendingSecure = false
 
 local function Readable(v)
@@ -38,22 +55,28 @@ local function HasWeapon(slot)
     return classID == WEAPON_CLASS
 end
 
+local function ExpiringMs(info, db)
+    local ms = info and info.remainingTimeMs
+    if db.timeThreshold > 0 and Readable(ms) and ms > 0 and ms < db.timeThreshold * 60000 then
+        return ms
+    end
+    return nil
+end
+
 local function SlotNeedsPoison(slot, db)
     if not HasWeapon(slot) then return false end
     local info = C_PaperDollInfo.GetTemporaryEnchantmentInfo(slot)
     if not info then return true end
-    local ms, charges = info.remainingTimeMs, info.chargesRemaining
-    if db.timeThreshold > 0 and Readable(ms) and ms > 0 and ms < db.timeThreshold * 60000 then
-        return true
-    end
+    if ExpiringMs(info, db) then return true end
+    local charges = info.chargesRemaining
     if db.chargesThreshold > 0 and Readable(charges) and charges > 0 and charges < db.chargesThreshold then
         return true
     end
     return false
 end
 
-local function KnowsVanish()
-    for _, spellID in ipairs(VANISH_RANKS) do
+local function KnowsAny(spells)
+    for _, spellID in ipairs(spells) do
         if IsPlayerSpell(spellID) then return true end
     end
     return false
@@ -105,9 +128,9 @@ local function ButtonOnEnter(self)
     GameTooltip:Show()
 end
 
-local function FlashOnEnter(self)
+local function ReagentOnEnter(self)
     GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-    GameTooltip:SetItemByID(ns.ITEM.FLASH_POWDER)
+    GameTooltip:SetItemByID(self.itemID)
     GameTooltip:Show()
 end
 
@@ -154,6 +177,7 @@ local function PaintIcon(f, count, threshold, db)
     f.icon:SetDesaturated(count == 0)
     ApplyFont(f.low, SmallFontSize(db))
     f.low:SetText(low and L["WARN_LOW_STOCK"] or "")
+    return low
 end
 
 local function GetButton(index)
@@ -202,13 +226,21 @@ local function CreateFrames()
     container.hint:SetPoint("BOTTOM", container, "TOP", 0, 3)
     container.hint:SetTextColor(0.9, 0.9, 0.9)
 
-    flashIcon = CreateFrame("Frame", addonName .. "FlashPowder", container)
-    DecorateIcon(flashIcon)
-    flashIcon.icon:SetTexture(C_Item.GetItemIconByID(ns.ITEM.FLASH_POWDER) or FALLBACK_ICON)
-    flashIcon:EnableMouse(true)
-    flashIcon:SetScript("OnEnter", FlashOnEnter)
-    flashIcon:SetScript("OnLeave", IconOnLeave)
-    flashIcon:Hide()
+    container.timer = container:CreateFontString(nil, "OVERLAY")
+    container.timer:SetPoint("TOP", container, "BOTTOM", 0, -3)
+    container.timer:SetTextColor(1, 0.82, 0)
+
+    for i, reagent in ipairs(REAGENTS) do
+        local icon = CreateFrame("Frame", addonName .. reagent.name, container)
+        DecorateIcon(icon)
+        icon.itemID = reagent.itemID
+        icon.icon:SetTexture(C_Item.GetItemIconByID(reagent.itemID) or FALLBACK_ICON)
+        icon:EnableMouse(true)
+        icon:SetScript("OnEnter", ReagentOnEnter)
+        icon:SetScript("OnLeave", IconOnLeave)
+        icon:Hide()
+        reagentIcons[i] = icon
+    end
 
     mover = CreateFrame("Frame", nil, container)
     mover:SetAllPoints()
@@ -254,7 +286,9 @@ function M:Scan()
             if itemID then entries[#entries + 1] = itemID end
         end
     end
-    flashTracked = db.trackFlash and KnowsVanish()
+    for i, reagent in ipairs(REAGENTS) do
+        reagentTracked[i] = db[reagent.trackKey] and KnowsAny(reagent.spells)
+    end
 end
 
 function M:EvaluateNeeds()
@@ -307,13 +341,15 @@ function M:ApplySecure()
     end
 
     local shownCount = #items
-    local flashCount = Count(ns.ITEM.FLASH_POWDER)
-    local showFlash = flashTracked and (preview or IsLow(db, flashCount, db.flashThreshold))
-    if showFlash then
-        shownCount = shownCount + 1
-        PlaceIcon(flashIcon, shownCount, size, spacing)
+    for i, reagent in ipairs(REAGENTS) do
+        local icon = reagentIcons[i]
+        local show = reagentTracked[i] and (preview or IsLow(db, Count(reagent.itemID), db[reagent.threshKey]))
+        if show then
+            shownCount = shownCount + 1
+            PlaceIcon(icon, shownCount, size, spacing)
+        end
+        icon:SetShown(show)
     end
-    flashIcon:SetShown(showFlash)
 
     local width = math.max(shownCount, 1) * size + math.max(shownCount - 1, 0) * spacing
     container:SetSize(width, size)
@@ -328,12 +364,48 @@ function M:ApplySecure()
     container:SetShown(db.enabled and shownCount > 0)
 end
 
+function M:UpdateTimer()
+    local db = ns.db.profile
+    ApplyFont(container.timer, SmallFontSize(db))
+    if not db.locked then
+        container.timer:SetText("")
+        return
+    end
+    local parts = {}
+    local mhMs = HasWeapon(MAIN_HAND) and ExpiringMs(C_PaperDollInfo.GetTemporaryEnchantmentInfo(MAIN_HAND), db)
+    if mhMs then parts[#parts + 1] = L["TIP_MAIN_HAND"] .. " " .. FormatTime(mhMs) end
+    local ohMs = HasWeapon(OFF_HAND) and ExpiringMs(C_PaperDollInfo.GetTemporaryEnchantmentInfo(OFF_HAND), db)
+    if ohMs then parts[#parts + 1] = L["TIP_OFF_HAND"] .. " " .. FormatTime(ohMs) end
+    container.timer:SetText(table.concat(parts, "  "))
+end
+
 function M:UpdateTexts()
     local db = ns.db.profile
+    local smallSize = SmallFontSize(db)
+    local maxLowHeight = 0
     for _, b in ipairs(buttons) do
-        if b.itemID then PaintIcon(b, Count(b.itemID), db.poisonThreshold, db) end
+        if b.itemID then
+            local low = PaintIcon(b, Count(b.itemID), db.poisonThreshold, db)
+            if low then
+                local h = b.low:GetStringHeight() or 0
+                maxLowHeight = math.max(maxLowHeight, h > 0 and h or smallSize)
+            end
+        end
     end
-    PaintIcon(flashIcon, Count(ns.ITEM.FLASH_POWDER), db.flashThreshold, db)
+    for i, reagent in ipairs(REAGENTS) do
+        local icon = reagentIcons[i]
+        local low = PaintIcon(icon, Count(reagent.itemID), db[reagent.threshKey], db)
+        if icon:IsShown() and low then
+            local h = icon.low:GetStringHeight() or 0
+            maxLowHeight = math.max(maxLowHeight, h > 0 and h or smallSize)
+        end
+    end
+    if not InCombatLockdown() then
+        local yOffset = maxLowHeight > 0 and -(maxLowHeight + 6) or -3
+        container.timer:ClearAllPoints()
+        container.timer:SetPoint("TOP", container, "BOTTOM", 0, yOffset)
+    end
+    self:UpdateTimer()
 end
 
 function M:Refresh()
@@ -347,9 +419,12 @@ end
 function M:OnTick()
     local before = needsPoison
     self:EvaluateNeeds()
-    if before == needsPoison then return end
-    self:ApplySecure()
-    self:UpdateTexts()
+    if before ~= needsPoison then
+        self:ApplySecure()
+        self:UpdateTexts()
+    else
+        self:UpdateTimer()
+    end
 end
 
 function M:OnPlayerLogin()

@@ -1,7 +1,8 @@
 local _, ns = ...
 
 ns.ITEM = {
-    FLASH_POWDER = 5140,
+    FLASH_POWDER    = 5140,
+    BLINDING_POWDER = 5530,
 }
 
 ns.POISON_TYPES = {

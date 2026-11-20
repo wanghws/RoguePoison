@@ -30,6 +30,8 @@ L["OPT_SHOW_WARNINGS"]       = "Warn when stock is low"
 L["OPT_POISON_THRESHOLD"]    = "Poison / sharpening stone count below"
 L["OPT_FLASH_THRESHOLD"]     = "Flash Powder count below"
 L["OPT_TRACK_FLASH"]         = "Track Flash Powder"
+L["OPT_BLIND_THRESHOLD"]     = "Blinding Powder count below"
+L["OPT_TRACK_BLIND"]         = "Track Blinding Powder"
 L["OPT_POISONS_HELP"]        = "Unchecked items are neither shown nor checked for stock."
 
 L["ANCHOR_CENTER"]           = "Center"
