@@ -5,7 +5,9 @@ player's bags plus sharpening stones (one icon per type, highest rank in
 bags, stack count on the icon). Left-click applies to the main hand,
 right-click to the off hand. Warns when poisons, sharpening stones, Flash
 Powder or Blinding Powder run low. Poison-crafting reagents are deliberately
-not tracked.
+not tracked on the bar; instead, with a vendor and the crafting window open,
+a buy row above "Create All" buys the reagents for N stacks / N items of the
+selected poison.
 
 ## Target client
 
@@ -38,6 +40,7 @@ RoguePoison/
   Init.lua         ns setup, module registry, bootstrap, minimap icon, slash
   Config.lua       AceDB defaults (RoguePoisonDB)
   Modules/PoisonBar.lua  the bar, tooltips, low-stock labels
+  Modules/ReagentBuyer.lua  vendor buy row on the profession crafting page
   Options.lua      AceGUI settings window + Blizzard Settings entry
 tests/poisonbar_spec.lua  stubbed-API spec, no client needed
 art/                      icon source (not shipped)
@@ -113,7 +116,46 @@ Libs → Locales → Data → `Init.lua` → `Config.lua` → Modules → `Optio
   `HINT_CLICK_OFF`, by which hands some shown, in-stock button can apply to),
   same small font size as the low label. It is empty while unlocked or when
   no shown button can be applied.
-- The bar is shown whenever it has at least one icon.
+- The bar is shown whenever it has at least one icon, except in a rest area
+  (`IsResting()`, refreshed on `PLAYER_UPDATE_RESTING`); unlocked preview
+  still shows there.
+
+## Reagent buyer
+
+- Lives on `ProfessionsFrame.CraftingPage` (`Blizzard_Professions`, load on
+  demand), anchored above `CreateAllButton`; recipe changes come from a
+  `hooksecurefunc` on `SchematicForm.Init`.
+- Shown only while `enabled` is on, a merchant is open, the selected recipe
+  is learned, crafts an item of kind `poison` in `ns.ITEM_KIND` (so Blinding
+  Powder and sharpening stones are excluded; no vendor sells stone) and every
+  basic reagent (`Enum.CraftingReagentType.Basic`) is sold by that merchant
+  for gold. That is the "poison vendor" check.
+- Two rows stacked above `CreateAllButton`, left edges aligned with it
+  (stacks on top, items below), each `[box] unit [Buy] cost`; the Buy
+  buttons line up at the widest unit label. The cost after the button is the
+  coin string of the plan, red with `BUY_NO_GOLD` when the player cannot
+  afford it (button disabled; `PLAYER_MONEY` refreshes), empty when nothing
+  is to be bought.
+- N stacks = N x item max stack, N items as typed; amounts in
+  `ns.db.profile.buyAmount`. Buys only what the bags lack, rounded up to the
+  vendor bundle (`stackCount`), capped per call at `GetMerchantItemMaxStack`.
+  Purchases go one at a time, the next after `BAG_UPDATE_DELAYED` shows the
+  last. A purchase red error (`ERR_INV_FULL`, `ERR_BAG_FULL`,
+  `ERR_ITEM_MAX_COUNT`, `ERR_NOT_ENOUGH_MONEY`, `ERR_VENDOR_SOLD_OUT`,
+  `ERR_VENDOR_TOO_FAR`; other red errors are ignored), a `MERCHANT_UPDATE`
+  that moves the item being bought off its merchant index, or closing the
+  merchant stops the run and prints `BUY_STOPPED`. No timeout. A vendor whose limited stock (`numAvailable`) cannot cover
+  the plan disables that button and its tooltip says `BUY_OUT_OF_STOCK`. The
+  button tooltip lists what will be bought, and is redrawn on every update
+  while hovered; it is hidden when the plan cannot be computed or the panel
+  hides.
+- A missing max stack size (stacks row) or reagent name (tooltip) calls
+  `C_Item.RequestLoadItemDataByID` once per item; a successful
+  `ITEM_DATA_LOAD_RESULT` refreshes the panel once, only while the panel is
+  shown. A failed load is not requested again.
+- A focused amount box holding an invalid value (empty or below 1) disables
+  its own Buy button; losing focus restores the saved amount. Clicking either
+  Buy button first clears focus from both boxes.
 
 ## Combat lockdown
 

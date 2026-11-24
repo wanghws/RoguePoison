@@ -454,7 +454,7 @@ function M:ApplySecure()
     end
     mover.label:SetText(L["MOVER_LABEL"])
     mover:SetShown(preview and db.enabled)
-    container:SetShown(db.enabled and shownCount > 0)
+    container:SetShown(db.enabled and shownCount > 0 and (preview or not IsResting()))
 end
 
 function M:UpdateTimer()
@@ -528,6 +528,7 @@ function M:OnPlayerLogin()
     events:RegisterEvent("WEAPON_ENCHANT_CHANGED")
     events:RegisterEvent("PLAYER_REGEN_ENABLED")
     events:RegisterEvent("SPELLS_CHANGED")
+    events:RegisterEvent("PLAYER_UPDATE_RESTING")
     events:SetScript("OnEvent", function(_, event)
         if event == "WEAPON_ENCHANT_CHANGED" then
             M:OnTick()

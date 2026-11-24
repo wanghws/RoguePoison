@@ -16,6 +16,7 @@ local defaults = {
         flashThreshold    = 10,
         trackBlind        = true,
         blindThreshold    = 10,
+        buyAmount         = { stacks = 1, items = 1 },
         poisons = {
             instant     = true,
             deadly      = true,

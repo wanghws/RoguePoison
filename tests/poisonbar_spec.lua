@@ -37,6 +37,15 @@ function FrameMT:GetFont() return "Fonts\\ARIALN.TTF", 12, "" end
 function FrameMT:SetTexture(t) self._tex = t end
 function FrameMT:SetDesaturated(d) self._desat = d end
 function FrameMT:SetTextColor(r,g,b) self._color = {r,g,b} end
+function FrameMT:SetEnabled(v) self._enabled = v end
+function FrameMT:SetFocus() self._focus = true end
+function FrameMT:HasFocus() return self._focus == true end
+function FrameMT:ClearFocus()
+  if not self._focus then return end
+  self._focus = false
+  if self._scripts.OnEditFocusLost then self._scripts.OnEditFocusLost(self) end
+end
+function FrameMT:HookScript(k, fn) self._hooks = self._hooks or {}; self._hooks[k] = fn end
 
 local function newObj(parent, template)
   local o = setmetatable({ _attr = {}, _events = {}, _scripts = {}, _shown = true, _children = {} }, FrameMT)
@@ -62,7 +71,9 @@ UIParent = newObj()
 NumberFontNormal = newObj()
 GameTooltip = newObj()
 local tipLines = {}
-GameTooltip.SetOwner = function() wipe(tipLines) end
+local tipOwner
+GameTooltip.SetOwner = function(_, o) wipe(tipLines); tipOwner = o end
+GameTooltip.IsOwned = function(_, f) return tipOwner == f end
 GameTooltip.AddLine = function(_, text) tipLines[#tipLines+1] = text end
 GameTooltip.AddDoubleLine = function(_, left, right) tipLines[#tipLines+1] = left .. "|" .. right end
 INVSLOT_MAINHAND, INVSLOT_OFFHAND = 16, 17
@@ -70,6 +81,7 @@ Enum = {
   ItemClass = { Weapon = 2 },
   ItemWeaponSubclass = { Axe1H = 0, Axe2H = 1, Mace1H = 4, Polearm = 6, Sword1H = 7, Sword2H = 8, Unarmed = 13, Dagger = 15 },
   WeaponSlot = { MainHand = 0, OffHand = 1, Ranged = 2 },
+  CraftingReagentType = { Modifying = 0, Basic = 1, Finishing = 2 },
 }
 function InCombatLockdown() return inCombat end
 local stateDrivers = {}
@@ -104,18 +116,21 @@ end
 local FakeAceGUI = { Create = function() return aceWidget() end, Release = function() end }
 function UnitClass() return "Rogue", "ROGUE" end
 function IsPlayerSpell(id) return knownSpells[id] == true end
+local resting = false
+function IsResting() return resting end
 function GetInventoryItemID(_, slot) return equipped[slot] end
 local clientLocale = "zhCN"
 function GetLocale() return clientLocale end
 function wipe(t) for k in pairs(t) do t[k] = nil end return t end
 local SECRET = {}
 function issecretvalue(v) return v == SECRET end
-C_AddOns = { GetAddOnMetadata = function() return "1.0.0" end }
+C_AddOns = { GetAddOnMetadata = function() return "1.0.0" end, IsAddOnLoaded = function() return false end }
 C_Item = {
   GetItemCount = function(id) return bags[id] or 0 end,
   GetItemInfoInstant = function(id) return id, "Weapon", "Dagger", "INVTYPE_WEAPON", 1, 2, id == 1002 and 4 or 15 end,
   GetItemNameByID = function(id) return "Item" .. id end,
   GetItemIconByID = function(id) return 100000 + id end,
+  GetItemMaxStackSizeByID = function() return 20 end,
   RequestLoadItemDataByID = function() end,
   GetWeaponEnchantInfo = function(ws)
     local e = enchants[ws == 0 and 16 or 17]
@@ -131,7 +146,13 @@ local deferred = {}
 C_Timer = { NewTicker = function(_, fn) tickers[#tickers+1] = fn end, After = function(_, fn) deferred[#deferred+1] = fn end }
 SlashCmdList = {}
 Settings = { RegisterCanvasLayoutCategory = function() return {} end, RegisterAddOnCategory = function() end }
-function print(...) io.write("[print] ", table.concat({...}, " "), "\n") end
+local lastPrint
+ERR_INV_FULL = "Inventory is full."
+function print(...)
+  local line = table.concat({...}, " ")
+  if line:find("RoguePoison|r", 1, true) then lastPrint = line end
+  io.write("[print] ", line, "\n")
+end
 
 local libs = {}
 LibStub = setmetatable({ NewLibrary = function() end }, { __call = function(_, name)
@@ -154,7 +175,7 @@ local function load(rel)
   chunk("RoguePoison", ns)
 end
 for _, f in ipairs({ "Locales/Locales.lua", "Locales/enUS.lua", "Locales/zhCN.lua", "Locales/zhTW.lua", "Data/Poisons.lua",
-  "Init.lua", "Config.lua", "Modules/PoisonBar.lua", "Options.lua" }) do load(f) end
+  "Init.lua", "Config.lua", "Modules/PoisonBar.lua", "Modules/ReagentBuyer.lua", "Options.lua" }) do load(f) end
 
 local function fire(event, ...)
   for f in pairs(eventFrames) do
@@ -355,6 +376,23 @@ equipped[17] = nil
 fire("PLAYER_EQUIPMENT_CHANGED")
 check(buttonFor(8985)._attr.type2 == nil, "no right-click action without off hand weapon")
 check(bar.hint._text == "左键主手", "click hint drops off hand without off hand weapon")
+resting = true
+fire("PLAYER_UPDATE_RESTING")
+check(not bar._shown, "bar hidden in a rest area")
+setCombat(true)
+resting = false
+fire("PLAYER_UPDATE_RESTING")
+check(#blocked == 0 and not bar._shown, "leaving a rest area in combat waits for combat to end")
+setCombat(false)
+fire("PLAYER_REGEN_ENABLED")
+check(bar._shown, "bar back after leaving the rest area")
+resting = true
+ns.db.profile.locked = false
+ns:RefreshAll()
+check(bar._shown, "unlocked preview still shows in a rest area")
+ns.db.profile.locked = true
+resting = false
+fire("PLAYER_UPDATE_RESTING")
 
 ns.db.profile.locked = false
 ns:RefreshAll()
@@ -404,4 +442,242 @@ check(not flash._shown and not blind._shown, "no reagent icons before spells are
 ns.db.profile.enabled = false
 ns:RefreshAll()
 check(not bar._shown, "disabled hides bar")
+
+local merchant, purchases, money = {}, {}, 1000000
+function GetMerchantNumItems() return #merchant end
+function GetMerchantItemID(i) return merchant[i] and merchant[i].itemID end
+function GetMerchantItemMaxStack(i) return merchant[i].maxStack or 20 end
+function GetMoney() return money end
+function BuyMerchantItem(i, n)
+  purchases[#purchases+1] = merchant[i].itemID .. "x" .. n
+  bags[merchant[i].itemID] = (bags[merchant[i].itemID] or 0) + n
+end
+C_MerchantFrame = { GetItemInfo = function(i)
+  local m = merchant[i]
+  return { price = m.price, stackCount = m.step or 1, numAvailable = m.available or -1, isPurchasable = true, hasExtendedCost = false }
+end }
+C_CurrencyInfo = { GetCoinTextureString = function(c) return "coin" .. c end }
+local schematics = {
+  [1] = { outputItemID = 8928, quantityMin = 1, reagentSlotSchematics = {
+    { reagentType = 1, quantityRequired = 4, reagents = { { itemID = 8924 } } },
+    { reagentType = 1, quantityRequired = 1, reagents = { { itemID = 8925 } } } } },
+  [2] = { outputItemID = 5530, quantityMin = 1, reagentSlotSchematics = {
+    { reagentType = 1, quantityRequired = 1, reagents = { { itemID = 2452 } } } } },
+  [3] = { outputItemID = 12404, quantityMin = 1, reagentSlotSchematics = {
+    { reagentType = 1, quantityRequired = 1, reagents = { { itemID = 12365 } } } } },
+}
+C_TradeSkillUI = { GetRecipeSchematic = function(id) return schematics[id] end }
+local selectedRecipe = 1
+function hooksecurefunc(t, name, fn)
+  local orig = t[name]
+  t[name] = function(...) local r = orig(...); fn(...); return r end
+end
+ProfessionsFrame = newObj()
+local page = newObj(ProfessionsFrame)
+ProfessionsFrame.CraftingPage = page
+page.CreateAllButton = newObj(page)
+page.SchematicForm = newObj(page)
+page.SchematicForm.GetRecipeInfo = function() return { recipeID = selectedRecipe, learned = true } end
+page.SchematicForm.Init = function() end
+fire("ADDON_LOADED", "Blizzard_Professions")
+local buyPanel
+for _, f in ipairs(frames) do if rawget(f, "_parent") == page and rawget(f, "rows") then buyPanel = f end end
+check(buyPanel ~= nil and not buyPanel._shown, "buy panel created hidden above Create All")
+check(buyPanel._point[2] == page.CreateAllButton, "buy panel anchored to Create All")
+local function selectRecipe(id) selectedRecipe = id; page.SchematicForm:Init() end
+local function buyButton(mode) return buyPanel.rows[mode].button end
+
+ns.db.profile.enabled = true
+merchant = { { itemID = 8924, price = 300 }, { itemID = 8925, price = 200, step = 5 } }
+selectRecipe(1)
+check(not buyPanel._shown, "no buy panel without a merchant")
+fire("MERCHANT_SHOW")
+check(buyPanel._shown, "buy panel shown at a poison vendor")
+check(buyPanel.rows.stacks.unit._text == "组" and buyPanel.rows.items.unit._text == "个" and buyButton("items")._text == "购买", "buy row labels")
+check(buyPanel.rows.stacks.box._text == 1, "amount defaults to 1")
+bags[8924], bags[8925] = 15, 3
+fire("BAG_UPDATE_DELAYED")
+check(buyButton("items")._enabled == false, "buy 1 disabled when bags hold enough")
+buyButton("items")._scripts.OnEnter(buyButton("items"))
+check(tipLines[1] == "背包中材料已足够", "tooltip says reagents are enough")
+check(buyButton("stacks")._enabled == true, "buy 1 stack enabled")
+buyButton("stacks")._scripts.OnEnter(buyButton("stacks"))
+check(table.concat(tipLines, ";") == "Item8924|x65;Item8925|x20", "stack tooltip lists missing reagents: " .. table.concat(tipLines, ";"))
+check(buyPanel.rows.stacks.cost._text == "coin20300" and buyPanel.rows.stacks.cost._color[2] == 1, "stack cost shown after its button")
+check(buyPanel.rows.items.cost._text == "", "no cost when bags hold enough")
+local stacksPt, itemsPt = buyPanel.rows.stacks.box._point, buyPanel.rows.items.box._point
+check(stacksPt[2] == buyPanel and itemsPt[2] == buyPanel and stacksPt[4] == 5 and itemsPt[4] == 5, "rows left-aligned with Create All")
+check(stacksPt[5] > itemsPt[5], "stacks row above items row")
+check(buyButton("stacks")._point[2] == buyPanel.rows.stacks.unit and buyButton("items")._point[4] == buyButton("stacks")._point[4], "buy buttons line up")
+check(buyPanel.rows.stacks.cost._point[2] == buyButton("stacks"), "cost anchored after the buy button")
+bags[8924], bags[8925] = 0, 0
+buyButton("items")._scripts.OnClick(buyButton("items"))
+check(table.concat(purchases, ",") == "8924x4", "first purchase sent alone: " .. table.concat(purchases, ","))
+check(buyButton("items")._enabled == false and buyButton("stacks")._enabled == false, "buttons disabled while buying")
+fire("BAG_UPDATE_DELAYED")
+check(table.concat(purchases, ",") == "8924x4,8925x5", "vials rounded up to the vendor bundle: " .. table.concat(purchases, ","))
+fire("BAG_UPDATE_DELAYED")
+check(buyButton("stacks")._enabled == true, "buttons re-enabled after the job")
+check(tipLines[1] == "Item8924|x76", "hovered stack tooltip refreshed after the job: " .. tostring(tipLines[1]))
+wipe(purchases)
+bags[8924], bags[8925] = 0, 0
+ns.db.profile.buyAmount.stacks = 2
+buyButton("stacks")._scripts.OnClick(buyButton("stacks"))
+for _ = 1, 9 do fire("BAG_UPDATE_DELAYED") end
+check(table.concat(purchases, ",") == "8924x20,8924x20,8924x20,8924x20,8924x20,8924x20,8924x20,8924x20,8925x20,8925x20",
+  "2 stacks bought in max-stack chunks: " .. table.concat(purchases, ","))
+fire("BAG_UPDATE_DELAYED")
+wipe(purchases)
+bags[8924], bags[8925] = 0, 0
+buyButton("stacks")._scripts.OnClick(buyButton("stacks"))
+lastPrint = nil
+fire("UI_ERROR_MESSAGE", 51, "Ability is not ready yet.")
+check(lastPrint == nil and buyButton("stacks")._enabled == false, "unrelated red error keeps the run going")
+fire("UI_ERROR_MESSAGE", 2, ERR_INV_FULL)
+fire("BAG_UPDATE_DELAYED")
+check(#purchases == 1 and buyButton("stacks")._enabled == true, "full bags stop the purchase run")
+check(lastPrint and lastPrint:find("材料购买已中断"), "stopped run is reported: " .. tostring(lastPrint))
+wipe(purchases)
+bags[8924], bags[8925] = 0, 0
+buyButton("items")._scripts.OnClick(buyButton("items"))
+fire("BAG_UPDATE_DELAYED")
+lastPrint = nil
+fire("BAG_UPDATE_DELAYED")
+check(lastPrint == nil, "finished run prints nothing")
+wipe(purchases)
+bags[8924], bags[8925] = 0, 0
+buyButton("items")._scripts.OnClick(buyButton("items"))
+fire("MERCHANT_UPDATE")
+check(#purchases == 1 and lastPrint == nil and buyButton("items")._enabled == false, "unchanged merchant list keeps the run going")
+merchant[1], merchant[2] = merchant[2], merchant[1]
+fire("MERCHANT_UPDATE")
+check(lastPrint and lastPrint:find("材料购买已中断") and buyButton("items")._enabled == true, "reshuffled merchant list stops the run")
+merchant[1], merchant[2] = merchant[2], merchant[1]
+lastPrint = nil
+fire("MERCHANT_UPDATE")
+wipe(purchases)
+bags[8924], bags[8925] = 0, 0
+merchant[2].available = 3
+fire("MERCHANT_UPDATE")
+check(buyButton("items")._enabled == true and buyButton("stacks")._enabled == false, "limited stock disables only the plan it cannot cover")
+buyButton("stacks")._scripts.OnEnter(buyButton("stacks"))
+check(tipLines[1] == "商人库存不足", "tooltip says the vendor is short")
+buyButton("stacks")._scripts.OnClick(buyButton("stacks"))
+check(#purchases == 0, "nothing bought when the vendor is short")
+merchant[2].available = nil
+fire("MERCHANT_UPDATE")
+ns.db.profile.enabled = false
+ns:RefreshAll()
+check(not buyPanel._shown, "hidden when the addon is disabled")
+ns.db.profile.enabled = true
+ns:RefreshAll()
+check(buyPanel._shown, "shown again when re-enabled")
+
+buyButton("stacks")._scripts.OnEnter(buyButton("stacks"))
+check(GameTooltip._shown and GameTooltip:IsOwned(buyButton("stacks")), "stack tooltip open")
+local unloaded, loadRequests = { [8928] = true }, {}
+C_Item.GetItemMaxStackSizeByID = function(id) if not unloaded[id] then return 20 end end
+C_Item.GetItemNameByID = function(id) if not unloaded[id] then return "Item" .. id end end
+C_Item.RequestLoadItemDataByID = function(id) loadRequests[#loadRequests+1] = id end
+local buyer = ns.modules.reagentBuyer
+local origUpdate, updates = buyer.Update, 0
+buyer.Update = function(self) updates = updates + 1; return origUpdate(self) end
+bags[8924], bags[8925] = 0, 0
+fire("MERCHANT_UPDATE")
+check(buyButton("stacks")._enabled == false and buyButton("items")._enabled == true, "stack button waits for the max stack size")
+check(table.concat(loadRequests, ",") == "8928", "max stack size requested once: " .. table.concat(loadRequests, ","))
+check(not GameTooltip._shown, "hovered tooltip hidden when its plan cannot be computed")
+updates = 0
+fire("ITEM_DATA_LOAD_RESULT", 8928, false)
+check(updates == 0, "failed load does not refresh")
+fire("MERCHANT_UPDATE")
+check(table.concat(loadRequests, ",") == "8928", "failed load is not requested again")
+updates = 0
+fire("ITEM_DATA_LOAD_RESULT", 9999, true)
+check(updates == 0, "unrequested item data does not refresh")
+unloaded[8928] = nil
+fire("ITEM_DATA_LOAD_RESULT", 8928, true)
+check(updates == 1 and buyButton("stacks")._enabled == true, "one refresh once the max stack size loads")
+fire("ITEM_DATA_LOAD_RESULT", 8928, true)
+check(updates == 1, "repeat load result ignored")
+wipe(loadRequests)
+unloaded[8924] = true
+buyButton("stacks")._scripts.OnEnter(buyButton("stacks"))
+check(tipLines[1] == "item:8924|x160" and table.concat(loadRequests, ",") == "8924", "missing reagent name requested: " .. tostring(tipLines[1]))
+unloaded[8924] = nil
+fire("ITEM_DATA_LOAD_RESULT", 8924, true)
+check(tipLines[1] == "Item8924|x160", "tooltip redrawn with the loaded name: " .. tostring(tipLines[1]))
+wipe(loadRequests)
+unloaded[8928] = true
+fire("MERCHANT_UPDATE")
+check(table.concat(loadRequests, ",") == "8928", "max stack size requested while shown")
+buyButton("items")._scripts.OnEnter(buyButton("items"))
+merchant = {}
+fire("MERCHANT_UPDATE")
+check(not buyPanel._shown, "panel hidden before the data arrives")
+check(not GameTooltip._shown, "hovered tooltip hidden with the panel")
+merchant = { { itemID = 8924, price = 300 }, { itemID = 8925, price = 200, step = 5 } }
+updates = 0
+unloaded[8928] = nil
+fire("ITEM_DATA_LOAD_RESULT", 8928, true)
+check(updates == 0, "no refresh while the panel is hidden")
+fire("MERCHANT_UPDATE")
+buyer.Update = origUpdate
+
+local itemsBox, stacksBox = buyPanel.rows.items.box, buyPanel.rows.stacks.box
+itemsBox:SetFocus()
+itemsBox._text = ""
+itemsBox._scripts.OnTextChanged(itemsBox, true)
+check(buyButton("items")._enabled == false and buyButton("stacks")._enabled == true, "empty focused input disables only its button")
+itemsBox._text = "0"
+itemsBox._scripts.OnTextChanged(itemsBox, true)
+check(buyButton("items")._enabled == false, "zero disables the button")
+check(ns.db.profile.buyAmount.items == 1, "invalid input keeps the saved amount")
+itemsBox:ClearFocus()
+check(itemsBox._text == 1 and buyButton("items")._enabled == true, "focus lost restores the amount and the button")
+itemsBox:SetFocus()
+itemsBox._text = "3"
+itemsBox._scripts.OnTextChanged(itemsBox, true)
+check(ns.db.profile.buyAmount.items == 3 and buyButton("items")._enabled == true, "valid input saved while focused")
+stacksBox:SetFocus()
+wipe(purchases)
+buyButton("items")._scripts.OnClick(buyButton("items"))
+check(not itemsBox:HasFocus() and not stacksBox:HasFocus(), "buy click clears both inputs' focus")
+check(table.concat(purchases, ",") == "8924x12", "click buys for the typed amount: " .. table.concat(purchases, ","))
+fire("BAG_UPDATE_DELAYED")
+fire("BAG_UPDATE_DELAYED")
+ns.db.profile.buyAmount.items = 1
+bags[8924], bags[8925] = 0, 0
+fire("MERCHANT_UPDATE")
+wipe(purchases)
+bags[8924], bags[8925] = 0, 0
+money = 100
+fire("PLAYER_MONEY")
+check(buyButton("items")._enabled == false, "buy disabled without enough gold")
+check(buyPanel.rows.items.cost._text == "coin1400  金币不足" and buyPanel.rows.items.cost._color[2] == 0.3, "cost in red with not-enough-gold: " .. tostring(buyPanel.rows.items.cost._text))
+buyButton("items")._scripts.OnClick(buyButton("items"))
+check(#purchases == 0, "nothing bought without enough money")
+money = 1000000
+fire("PLAYER_MONEY")
+check(buyButton("items")._enabled == true and buyPanel.rows.items.cost._text == "coin1400", "re-enabled when gold arrives")
+merchant = { { itemID = 8925, price = 200 } }
+fire("MERCHANT_UPDATE")
+check(not buyPanel._shown, "hidden when the vendor does not sell every reagent")
+merchant = { { itemID = 8924, price = 300 }, { itemID = 8925, price = 200 }, { itemID = 2452, price = 10 } }
+selectRecipe(2)
+check(not buyPanel._shown, "blinding powder recipe excluded")
+merchant = { { itemID = 12365, price = 50 } }
+selectRecipe(3)
+check(not buyPanel._shown, "sharpening stone recipe excluded")
+selectRecipe(1)
+merchant = { { itemID = 8924, price = 300 }, { itemID = 8925, price = 200 } }
+fire("MERCHANT_UPDATE")
+ns:SetLanguage("enUS")
+check(buyPanel.rows.stacks.unit._text == "stack(s)" and buyButton("stacks")._text == "Buy", "buy row relocalized")
+bags[8924], bags[8925] = 0, 0
+buyButton("items")._scripts.OnClick(buyButton("items"))
+lastPrint = nil
+fire("MERCHANT_CLOSED")
+check(not buyPanel._shown, "hidden when the merchant closes")
+check(lastPrint and lastPrint:find("reagent purchase stopped"), "closing mid-run is reported")
 print("ALL PASSED")

@@ -31,5 +31,6 @@ Init.lua
 Config.lua
 
 Modules\PoisonBar.lua
+Modules\ReagentBuyer.lua
 
 Options.lua
