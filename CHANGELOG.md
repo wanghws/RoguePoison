@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.2.0
+
+- Poisons and sharpening stones are now checked separately, so the bar no
+  longer disappears when a weapon has only one of them (WoW Forever allows
+  both at once). Stones are only offered for bladed weapons: maces and fist
+  weapons get no stone prompt, click binding or hint.
+- 毒药和磨刀石改为分开检查，武器只涂了其中一种时图标栏不再消失（WoW Forever
+  可同时涂两者）；磨刀石只针对利刃武器，锤和拳套不再提示磨刀石，也不绑定点击、
+  不显示点击提示。
+
 ## v1.1.0
 
 - Added a live countdown (`4:59`) under the bar for each weapon whose remaining
