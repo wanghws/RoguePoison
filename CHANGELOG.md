@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.2.0
+
+- At a poison vendor with the crafting window open, two rows above "Create
+  All" buy the reagents for N stacks or N items of the selected poison: only
+  what your bags lack, rounded up to the vendor's bundle size, with the total
+  cost shown (red "Not enough gold" when you cannot afford it). The poison bar
+  no longer shows in rest areas (inns, cities).
+- 在毒药商处打开制造界面时，"全部制造"上方新增两行「[N] 组 购买」「[N] 个 购买」，
+  一键购买制造所选毒药所需的材料：只买背包里缺的部分，按商人出售单位向上取整，
+  并显示总价（金币不足时红字提示）。在休息区域（旅店、主城）不再显示毒药栏。
+
 ## v1.1.0
 
 - Added a live countdown (`4:59`) under the bar for each weapon whose poison or
