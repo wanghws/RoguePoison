@@ -1,24 +1,19 @@
 # Changelog
 
-## v1.2.0
-
-- Poisons and sharpening stones are now checked separately, so the bar no
-  longer disappears when a weapon has only one of them (WoW Forever allows
-  both at once). Stones are only offered for bladed weapons: maces and fist
-  weapons get no stone prompt, click binding or hint.
-- 毒药和磨刀石改为分开检查，武器只涂了其中一种时图标栏不再消失（WoW Forever
-  可同时涂两者）；磨刀石只针对利刃武器，锤和拳套不再提示磨刀石，也不绑定点击、
-  不显示点击提示。
-
 ## v1.1.0
 
-- Added a live countdown (`4:59`) under the bar for each weapon whose remaining
-  poison time drops below the threshold (positioned below "Low stock" labels
-  when present). Added Blinding Powder low-stock tracking after learning Blind,
-  with its own toggle and threshold in settings.
-- 武器毒药剩余时间低于设定阈值时，在图标栏下方显示各到期武器的实时倒计时（如
-  `主手 4:59`），有「数量不足」提示时自动顺延在其下方；新增「致盲粉」库存检查
-  （学会致盲后生效），并在设置中提供独立开关和数量阈值。
+- Added a live countdown (`4:59`) under the bar for each weapon whose poison or
+  sharpening stone is about to expire, and Blinding Powder low-stock tracking
+  after learning Blind (own toggle and threshold). Poisons and sharpening
+  stones are now checked separately, so the bar stays up when a weapon has only
+  one of them (WoW Forever allows both at once); stones are only offered for
+  bladed weapons, so maces and fist weapons get no stone prompt, click binding
+  or hint.
+- 武器毒药或磨刀石即将到期时，在图标栏下方显示各武器的实时倒计时（如
+  `主手 4:59`），并新增「致盲粉」库存检查（学会致盲后生效，设置中有独立开关和
+  数量阈值）。毒药和磨刀石改为分开检查，武器只涂了其中一种时图标栏不再消失
+  （WoW Forever 可同时涂两者）；磨刀石只针对利刃武器，锤和拳套不再提示磨刀石，
+  也不绑定点击、不显示点击提示。
 
 ## v1.0.0
 
