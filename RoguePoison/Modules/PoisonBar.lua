@@ -6,7 +6,25 @@ ns:RegisterModule("poisonBar", M)
 
 local MAIN_HAND = INVSLOT_MAINHAND or 16
 local OFF_HAND  = INVSLOT_OFFHAND or 17
+local HANDS = {
+    { slot = MAIN_HAND, label = "TIP_MAIN_HAND", click = "TIP_LEFT_CLICK" },
+    { slot = OFF_HAND,  label = "TIP_OFF_HAND",  click = "TIP_RIGHT_CLICK" },
+}
+local ENCHANT_SLOT = {
+    [MAIN_HAND] = Enum.WeaponSlot.MainHand,
+    [OFF_HAND]  = Enum.WeaponSlot.OffHand,
+}
+local KINDS = { "poison", "stone" }
 local WEAPON_CLASS = Enum.ItemClass.Weapon
+local SUBCLASS = Enum.ItemWeaponSubclass
+local BLADED = {
+    [SUBCLASS.Axe1H]   = true,
+    [SUBCLASS.Axe2H]   = true,
+    [SUBCLASS.Sword1H] = true,
+    [SUBCLASS.Sword2H] = true,
+    [SUBCLASS.Polearm] = true,
+    [SUBCLASS.Dagger]  = true,
+}
 local FALLBACK_ICON = 134400
 local TICK_SECONDS = 1
 local SMALL_TEXT_SCALE = 0.75
@@ -33,11 +51,13 @@ local buttons = {}
 local reagentIcons = {}
 local reagentTracked = {}
 local entries = {}
-local needsPoison = false
+local trackedKinds = {}
+local slotStates = {}
+local needs = { poison = false, stone = false }
 local pendingSecure = false
 
-local function Readable(v)
-    return v ~= nil and not (issecretvalue and issecretvalue(v))
+local function IsSecret(v)
+    return issecretvalue ~= nil and issecretvalue(v) == true
 end
 
 local function Count(itemID)
@@ -51,28 +71,64 @@ end
 local function HasWeapon(slot)
     local itemID = GetInventoryItemID("player", slot)
     if not itemID then return false end
-    local classID = select(6, C_Item.GetItemInfoInstant(itemID))
-    return classID == WEAPON_CLASS
+    local _, _, _, _, _, classID, subclassID = C_Item.GetItemInfoInstant(itemID)
+    return classID == WEAPON_CLASS, subclassID
 end
 
-local function ExpiringMs(info, db)
-    local ms = info and info.remainingTimeMs
-    if db.timeThreshold > 0 and Readable(ms) and ms > 0 and ms < db.timeThreshold * 60000 then
+local function ReadSlot(slot)
+    local isWeapon, subclassID = HasWeapon(slot)
+    if not isWeapon then return nil end
+    local state = { takes = { poison = true, stone = BLADED[subclassID] == true }, enchants = {} }
+    local list = C_Item.GetWeaponEnchantInfo(ENCHANT_SLOT[slot])
+    if type(list) ~= "table" then return state end
+    for _, e in ipairs(list) do
+        if IsSecret(e.hasEnchant) or IsSecret(e.timeLeft) or IsSecret(e.charges) then
+            state.unknown = true
+            return state
+        end
+        if e.hasEnchant and e.timeLeft and e.timeLeft > 0 then
+            local charges = e.charges or 0
+            local kind = charges > 0 and "poison" or "stone"
+            state.enchants[kind] = state.enchants[kind] or { timeLeft = e.timeLeft, charges = charges }
+        end
+    end
+    return state
+end
+
+local function KnownState(slot)
+    local state = slotStates[slot]
+    if state and not state.unknown then return state end
+    return nil
+end
+
+local function ExpiringMs(enchant, db)
+    local ms = enchant and enchant.timeLeft
+    if db.timeThreshold > 0 and ms and ms < db.timeThreshold * 60000 then
         return ms
     end
     return nil
 end
 
-local function SlotNeedsPoison(slot, db)
-    if not HasWeapon(slot) then return false end
-    local info = C_PaperDollInfo.GetTemporaryEnchantmentInfo(slot)
-    if not info then return true end
-    if ExpiringMs(info, db) then return true end
-    local charges = info.chargesRemaining
-    if db.chargesThreshold > 0 and Readable(charges) and charges > 0 and charges < db.chargesThreshold then
-        return true
+local function KindNeeded(enchant, kind, db)
+    if not enchant then return true end
+    if ExpiringMs(enchant, db) then return true end
+    return kind == "poison" and db.chargesThreshold > 0 and enchant.charges < db.chargesThreshold
+end
+
+local function CanApply(slot, kind)
+    local state = slotStates[slot]
+    return state ~= nil and state.takes[kind]
+end
+
+local function SlotExpiringMs(slot, db)
+    local state = KnownState(slot)
+    if not state then return nil end
+    local soonest
+    for kind, enchant in pairs(state.enchants) do
+        local ms = trackedKinds[kind] and state.takes[kind] and ExpiringMs(enchant, db)
+        if ms and (not soonest or ms < soonest) then soonest = ms end
     end
-    return false
+    return soonest
 end
 
 local function KnowsAny(spells)
@@ -96,35 +152,47 @@ local function ApplyFont(fontString, size)
     fontString:SetFont(path, size, "OUTLINE")
 end
 
-local function AddSlotLine(label, slot)
-    local info = C_PaperDollInfo.GetTemporaryEnchantmentInfo(slot)
-    if not info then
-        GameTooltip:AddDoubleLine(label, L["TIP_NO_POISON"], 1, 1, 1, 1, 0.3, 0.3)
-        return
+local function SlotStatus(slot, kind)
+    local state = KnownState(slot)
+    if not (state and state.takes[kind]) then return nil end
+    local enchant = state.enchants[kind]
+    if not enchant then
+        return kind == "stone" and L["TIP_NO_STONE"] or L["TIP_NO_POISON"], true
     end
-    local parts = {}
-    if Readable(info.remainingTimeMs) and info.remainingTimeMs > 0 then
-        parts[#parts + 1] = FormatTime(info.remainingTimeMs)
+    local parts = { FormatTime(enchant.timeLeft) }
+    if enchant.charges > 0 then
+        parts[#parts + 1] = L["TIP_CHARGES"]:format(enchant.charges)
     end
-    if Readable(info.chargesRemaining) and info.chargesRemaining > 0 then
-        parts[#parts + 1] = L["TIP_CHARGES"]:format(info.chargesRemaining)
-    end
-    GameTooltip:AddDoubleLine(label, table.concat(parts, "  "), 1, 1, 1, 1, 1, 1)
+    return table.concat(parts, "  "), false
+end
+
+local function AddSection(lines)
+    if #lines == 0 then return end
+    GameTooltip:AddLine(" ")
+    for _, line in ipairs(lines) do line() end
 end
 
 local function ButtonOnEnter(self)
     if not self.itemID then return end
-    local hasOffHand = HasWeapon(OFF_HAND)
+    local kind = ns.ITEM_KIND[self.itemID]
+    local usable = Count(self.itemID) > 0
+    local status, clicks = {}, {}
+    for _, hand in ipairs(HANDS) do
+        local text, missing = SlotStatus(hand.slot, kind)
+        if text then
+            local shade = missing and 0.3 or 1
+            status[#status + 1] = function()
+                GameTooltip:AddDoubleLine(L[hand.label], text, 1, 1, 1, 1, shade, shade)
+            end
+        end
+        if usable and CanApply(hand.slot, kind) then
+            clicks[#clicks + 1] = function() GameTooltip:AddLine(L[hand.click], 0.3, 1, 0.3) end
+        end
+    end
     GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
     GameTooltip:SetItemByID(self.itemID)
-    GameTooltip:AddLine(" ")
-    AddSlotLine(L["TIP_MAIN_HAND"], MAIN_HAND)
-    if hasOffHand then AddSlotLine(L["TIP_OFF_HAND"], OFF_HAND) end
-    if Count(self.itemID) > 0 then
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine(L["TIP_LEFT_CLICK"], 0.3, 1, 0.3)
-        if hasOffHand then GameTooltip:AddLine(L["TIP_RIGHT_CLICK"], 0.3, 1, 0.3) end
-    end
+    AddSection(status)
+    AddSection(clicks)
     GameTooltip:Show()
 end
 
@@ -193,13 +261,14 @@ local function GetButton(index)
     return b
 end
 
-local function SetClickActions(b, itemID, offHand)
+local function SetClickActions(b, itemID)
     local usable = Count(itemID) > 0
-    b:SetAttribute("type1", usable and "macro" or nil)
-    b:SetAttribute("macrotext1", usable and ("/use item:%d\n/use %d"):format(itemID, MAIN_HAND) or nil)
-    local usableOffHand = usable and offHand
-    b:SetAttribute("type2", usableOffHand and "macro" or nil)
-    b:SetAttribute("macrotext2", usableOffHand and ("/use item:%d\n/use %d"):format(itemID, OFF_HAND) or nil)
+    local kind = ns.ITEM_KIND[itemID]
+    for button, hand in ipairs(HANDS) do
+        local apply = usable and CanApply(hand.slot, kind)
+        b:SetAttribute("type" .. button, apply and "macro" or nil)
+        b:SetAttribute("macrotext" .. button, apply and ("/use item:%d\n/use %d"):format(itemID, hand.slot) or nil)
+    end
 end
 
 local function SaveAnchor()
@@ -280,10 +349,14 @@ end
 function M:Scan()
     local db, seen = ns.db.profile, ns.db.char.seen
     wipe(entries)
+    wipe(trackedKinds)
     for _, poison in ipairs(ns.POISON_TYPES) do
         if db.poisons[poison.key] then
             local itemID = ResolveRank(poison, seen)
-            if itemID then entries[#entries + 1] = itemID end
+            if itemID then
+                entries[#entries + 1] = itemID
+                trackedKinds[poison.kind] = true
+            end
         end
     end
     for i, reagent in ipairs(REAGENTS) do
@@ -293,7 +366,22 @@ end
 
 function M:EvaluateNeeds()
     local db = ns.db.profile
-    needsPoison = SlotNeedsPoison(MAIN_HAND, db) or SlotNeedsPoison(OFF_HAND, db)
+    for _, hand in ipairs(HANDS) do
+        slotStates[hand.slot] = ReadSlot(hand.slot)
+    end
+    local changed = false
+    for _, kind in ipairs(KINDS) do
+        local need = false
+        for _, hand in ipairs(HANDS) do
+            local state = KnownState(hand.slot)
+            if state and state.takes[kind] and KindNeeded(state.enchants[kind], kind, db) then need = true end
+        end
+        if needs[kind] ~= need then
+            needs[kind] = need
+            changed = true
+        end
+    end
+    return changed
 end
 
 function M:ApplySecure()
@@ -306,7 +394,6 @@ function M:ApplySecure()
     local db = ns.db.profile
     local anchor = db.anchor
     local size, spacing = db.iconSize, db.spacing
-    local offHand = HasWeapon(OFF_HAND)
     local preview = not db.locked
 
     container:ClearAllPoints()
@@ -315,7 +402,7 @@ function M:ApplySecure()
     local items = {}
     for _, itemID in ipairs(entries) do
         local count = Count(itemID)
-        if preview or IsLow(db, count, db.poisonThreshold) or (needsPoison and count > 0) then
+        if preview or IsLow(db, count, db.poisonThreshold) or (needs[ns.ITEM_KIND[itemID]] and count > 0) then
             items[#items + 1] = itemID
         end
     end
@@ -325,12 +412,16 @@ function M:ApplySecure()
         end
     end
 
-    local hasUsable = false
+    local clickMain, clickOff = false, false
     for i, itemID in ipairs(items) do
-        if Count(itemID) > 0 then hasUsable = true end
+        if Count(itemID) > 0 then
+            local kind = ns.ITEM_KIND[itemID]
+            clickMain = clickMain or CanApply(MAIN_HAND, kind)
+            clickOff = clickOff or CanApply(OFF_HAND, kind)
+        end
         local b = GetButton(i)
         PlaceIcon(b, i, size, spacing)
-        SetClickActions(b, itemID, offHand)
+        SetClickActions(b, itemID)
         b.itemID = itemID
         b.icon:SetTexture(C_Item.GetItemIconByID(itemID) or FALLBACK_ICON)
         b:Show()
@@ -354,10 +445,12 @@ function M:ApplySecure()
     local width = math.max(shownCount, 1) * size + math.max(shownCount - 1, 0) * spacing
     container:SetSize(width, size)
     ApplyFont(container.hint, SmallFontSize(db))
-    if preview or not hasUsable then
+    if preview or not (clickMain or clickOff) then
         container.hint:SetText("")
+    elseif clickMain and clickOff then
+        container.hint:SetText(L["HINT_CLICK_BOTH"])
     else
-        container.hint:SetText(offHand and L["HINT_CLICK_BOTH"] or L["HINT_CLICK_MAIN"])
+        container.hint:SetText(clickMain and L["HINT_CLICK_MAIN"] or L["HINT_CLICK_OFF"])
     end
     mover.label:SetText(L["MOVER_LABEL"])
     mover:SetShown(preview and db.enabled)
@@ -372,9 +465,9 @@ function M:UpdateTimer()
         return
     end
     local parts = {}
-    local mhMs = HasWeapon(MAIN_HAND) and ExpiringMs(C_PaperDollInfo.GetTemporaryEnchantmentInfo(MAIN_HAND), db)
+    local mhMs = SlotExpiringMs(MAIN_HAND, db)
     if mhMs then parts[#parts + 1] = L["TIP_MAIN_HAND"] .. " " .. FormatTime(mhMs) end
-    local ohMs = HasWeapon(OFF_HAND) and ExpiringMs(C_PaperDollInfo.GetTemporaryEnchantmentInfo(OFF_HAND), db)
+    local ohMs = SlotExpiringMs(OFF_HAND, db)
     if ohMs then parts[#parts + 1] = L["TIP_OFF_HAND"] .. " " .. FormatTime(ohMs) end
     container.timer:SetText(table.concat(parts, "  "))
 end
@@ -417,9 +510,7 @@ function M:Refresh()
 end
 
 function M:OnTick()
-    local before = needsPoison
-    self:EvaluateNeeds()
-    if before ~= needsPoison then
+    if self:EvaluateNeeds() then
         self:ApplySecure()
         self:UpdateTexts()
     else

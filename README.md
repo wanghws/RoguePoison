@@ -6,7 +6,8 @@ Poison bar for Rogues on **WoW Forever**.
   screen, one icon per type (highest rank you carry) with the stack count.
 - Appears only when a weapon has no poison, less than 10 minutes left, or fewer
   than 10 charges; when a weapon's remaining time is below the threshold, a
-  live countdown (`4:59`) shows under the bar.
+  live countdown (`4:59`) shows under the bar. Poison and sharpening stone are
+  checked separately, so with only one of them applied the other still shows.
 - Left-click applies to the main hand, right-click to the off hand (a hint
   above the icons says so).
 - Hidden in combat, settings window included (it reopens after combat).
@@ -21,7 +22,7 @@ Poison bar for Rogues on **WoW Forever**.
 **WoW Forever** 盗贼毒药栏。
 
 - 在屏幕上方按类型显示背包中的毒药和磨刀石图标(取背包里的最高等级),并显示堆叠数量。
-- 只有当武器没有毒药、剩余时间少于 10 分钟或剩余次数少于 10 时才显示;剩余时间低于阈值时会在图标栏下方显示实时倒计时(如 `主手 4:59`)。
+- 只有当武器没有毒药、剩余时间少于 10 分钟或剩余次数少于 10 时才显示;剩余时间低于阈值时会在图标栏下方显示实时倒计时(如 `主手 4:59`)。毒药和磨刀石分开检查,只涂了其中一种时,另一种仍会显示。
 - 左键涂抹主手武器,右键涂抹副手武器(图标上方有提示)。
 - 战斗中自动隐藏,设置界面也一样(脱战后自动恢复)。
 - 毒药、磨刀石、闪光粉或致盲粉少于 10 个时,显示它的图标和现有数量,并在图标下方提示"数量不足"。

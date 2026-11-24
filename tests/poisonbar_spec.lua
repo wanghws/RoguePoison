@@ -1,7 +1,8 @@
 local ROOT = arg[1] or "RoguePoison"
 local inCombat = false
 local blocked = {}
-local bags, enchants, equipped = {}, {}, { [16] = 1000, [17] = 1001 }
+local bags, equipped = {}, { [16] = 1000, [17] = 1001 }
+local enchants = { [16] = {}, [17] = {} }
 local knownSpells = { [1856] = true }
 local frames, eventFrames = {}, {}
 local tickers = {}
@@ -14,7 +15,7 @@ local FrameMT = {}
 FrameMT.__index = function(t, k)
   local v = rawget(FrameMT, k)
   if v then return v end
-  return function() end
+  if type(k) == "string" and k:find("^%u") then return function() end end
 end
 function FrameMT:Show() secureCheck(self, "Show"); self._shown = true end
 function FrameMT:Hide() secureCheck(self, "Hide"); self._shown = false end
@@ -60,8 +61,16 @@ end
 UIParent = newObj()
 NumberFontNormal = newObj()
 GameTooltip = newObj()
+local tipLines = {}
+GameTooltip.SetOwner = function() wipe(tipLines) end
+GameTooltip.AddLine = function(_, text) tipLines[#tipLines+1] = text end
+GameTooltip.AddDoubleLine = function(_, left, right) tipLines[#tipLines+1] = left .. "|" .. right end
 INVSLOT_MAINHAND, INVSLOT_OFFHAND = 16, 17
-Enum = { ItemClass = { Weapon = 2 } }
+Enum = {
+  ItemClass = { Weapon = 2 },
+  ItemWeaponSubclass = { Axe1H = 0, Axe2H = 1, Mace1H = 4, Polearm = 6, Sword1H = 7, Sword2H = 8, Unarmed = 13, Dagger = 15 },
+  WeaponSlot = { MainHand = 0, OffHand = 1, Ranged = 2 },
+}
 function InCombatLockdown() return inCombat end
 local stateDrivers = {}
 function RegisterStateDriver(f, attr, cond)
@@ -99,16 +108,25 @@ function GetInventoryItemID(_, slot) return equipped[slot] end
 local clientLocale = "zhCN"
 function GetLocale() return clientLocale end
 function wipe(t) for k in pairs(t) do t[k] = nil end return t end
-function issecretvalue() return false end
+local SECRET = {}
+function issecretvalue(v) return v == SECRET end
 C_AddOns = { GetAddOnMetadata = function() return "1.0.0" end }
 C_Item = {
   GetItemCount = function(id) return bags[id] or 0 end,
-  GetItemInfoInstant = function(id) return id, "Weapon", "Dagger", "INVTYPE_WEAPON", 1, 2, 15 end,
+  GetItemInfoInstant = function(id) return id, "Weapon", "Dagger", "INVTYPE_WEAPON", 1, 2, id == 1002 and 4 or 15 end,
   GetItemNameByID = function(id) return "Item" .. id end,
   GetItemIconByID = function(id) return 100000 + id end,
   RequestLoadItemDataByID = function() end,
+  GetWeaponEnchantInfo = function(ws)
+    local e = enchants[ws == 0 and 16 or 17]
+    local list = { { hasEnchant = false, enchantType = 0, enchantID = 0, timeLeft = 0, charges = 0 } }
+    if e.stone then list[#list+1] = e.stone end
+    if e.poison then list[#list+1] = e.poison end
+    return list
+  end,
 }
-C_PaperDollInfo = { GetTemporaryEnchantmentInfo = function(slot) return enchants[slot] end }
+local function P(ms, charges) return { hasEnchant = true, enchantType = 2, enchantID = 625, timeLeft = ms, charges = charges } end
+local function S(ms) return { hasEnchant = true, enchantType = 2, enchantID = 2506, timeLeft = ms, charges = 0 } end
 local deferred = {}
 C_Timer = { NewTicker = function(_, fn) tickers[#tickers+1] = fn end, After = function(_, fn) deferred[#deferred+1] = fn end }
 SlashCmdList = {}
@@ -191,10 +209,14 @@ check(bar.hint._text == "左键主手,右键副手", "click hint above the icons
 check(bar.timer._text == "", "no countdown when weapons have no poison")
 check(not blind._shown, "no blinding powder icon before Blind is learned")
 
-enchants[16] = { remainingTimeMs = 30 * 60000, chargesRemaining = 50 }
-enchants[17] = { remainingTimeMs = 25 * 60000, chargesRemaining = 40 }
+enchants[16].poison = P(30 * 60000, 50)
+enchants[17].poison = P(25 * 60000, 40)
 tick()
-check(bar._shown and shownItems() == "8985,flash", "only low items shown when weapons poisoned: " .. shownItems())
+check(bar._shown and shownItems() == "8985,18262,flash", "stone still offered when weapons only poisoned: " .. shownItems())
+enchants[16].stone = S(30 * 60000)
+enchants[17].stone = S(30 * 60000)
+fire("WEAPON_ENCHANT_CHANGED")
+check(bar._shown and shownItems() == "8985,flash", "only low items shown when weapons poisoned and sharpened: " .. shownItems())
 check(flash._point[4] == 40, "flash powder icon follows the low poison")
 bags[5140] = 20
 bags[8985] = 20
@@ -220,29 +242,88 @@ bags[5530] = 20
 ns:RefreshAll()
 check(not bar._shown, "hidden when flash and blinding powder stocked")
 
-enchants[16] = { remainingTimeMs = 4 * 60000 + 59 * 1000, chargesRemaining = 50 }
+enchants[16].poison, enchants[17].poison = nil, nil
+fire("WEAPON_ENCHANT_CHANGED")
+check(bar._shown and shownItems() == "8928,8985", "poisons shown when weapons only have stones: " .. shownItems())
+check(bar.timer._text == "", "no countdown for missing poison")
+enchants[16].poison = P(30 * 60000, 50)
+enchants[17].poison = P(25 * 60000, 40)
+fire("WEAPON_ENCHANT_CHANGED")
+check(not bar._shown, "hidden when both weapons have poison and stone")
+enchants[16].stone = S(3 * 60000 + 30 * 1000)
+tick()
+check(bar._shown and shownItems() == "18262", "expiring stone offers only the stone: " .. shownItems())
+check(bar.timer._text == "主手 3:30", "countdown follows the expiring stone: " .. tostring(bar.timer._text))
+ns.db.profile.poisons.sharpening = false
+ns:RefreshAll()
+check(not bar._shown and bar.timer._text == "", "untracked stone neither shown nor counted down")
+ns.db.profile.poisons.sharpening = true
+enchants[16].stone = S(30 * 60000)
+ns:RefreshAll()
+check(not bar._shown, "hidden again after re-sharpening")
+
+equipped[17] = 1002
+enchants[17].stone = nil
+fire("PLAYER_EQUIPMENT_CHANGED")
+check(not bar._shown, "mace off hand without a stone needs none")
+enchants[16].stone = nil
+fire("WEAPON_ENCHANT_CHANGED")
+check(bar._shown and shownItems() == "18262", "dagger main hand still asks for a stone: " .. shownItems())
+local stone = buttonFor(18262)
+check(stone._attr.type1 == "macro" and stone._attr.type2 == nil, "stone has no right-click onto a mace off hand")
+check(bar.hint._text == "左键主手", "hint omits the mace off hand for the stone")
+stone._scripts.OnEnter(stone)
+check(table.concat(tipLines, ";") == " ;主手|无磨刀石; ;左键:涂抹主手武器", "stone tooltip skips the mace off hand: " .. table.concat(tipLines, ";"))
+equipped[16], equipped[17] = 1002, 1001
+enchants[17].stone = nil
+fire("PLAYER_EQUIPMENT_CHANGED")
+stone = buttonFor(18262)
+check(stone._attr.type1 == nil and stone._attr.macrotext2 == "/use item:18262\n/use 17", "stone only right-clicks onto a dagger off hand")
+check(bar.hint._text == "右键副手", "hint names only the off hand: " .. tostring(bar.hint._text))
+equipped[17] = 1002
+bags[18262] = 3
+fire("PLAYER_EQUIPMENT_CHANGED")
+stone = buttonFor(18262)
+check(stone and stone._attr.type1 == nil and stone._attr.type2 == nil, "low stone with two maces has no click action")
+check(bar.hint._text == "", "no hint when no hand takes the shown stone")
+stone._scripts.OnEnter(stone)
+check(#tipLines == 0, "no blank lines in the stone tooltip with two maces: " .. #tipLines)
+bags[18262] = 12
+equipped[16], equipped[17] = 1000, 1001
+enchants[16].stone = S(30 * 60000)
+enchants[17].stone = S(30 * 60000)
+equipped[17] = 1001
+fire("PLAYER_EQUIPMENT_CHANGED")
+check(not bar._shown, "hidden with dagger off hand sharpened again")
+enchants[16].poison = { hasEnchant = true, enchantType = 2, enchantID = 625, timeLeft = SECRET, charges = SECRET }
+fire("WEAPON_ENCHANT_CHANGED")
+check(not bar._shown, "unreadable enchant data is not treated as missing")
+enchants[16].poison = P(30 * 60000, 50)
+fire("WEAPON_ENCHANT_CHANGED")
+
+enchants[16].poison = P(4 * 60000 + 59 * 1000, 50)
 tick()
 check(bar._shown and bar.timer._text == "主手 4:59", "countdown shows main hand 4:59: " .. tostring(bar.timer._text))
 check(bar.timer._point[5] == -3, "countdown right below bar when no low-stock label")
-enchants[16] = { remainingTimeMs = 4 * 60000 + 58 * 1000, chargesRemaining = 50 }
+enchants[16].poison = P(4 * 60000 + 58 * 1000, 50)
 tick()
 check(bar.timer._text == "主手 4:58", "countdown ticks down while needsPoison stays true: " .. tostring(bar.timer._text))
-enchants[17] = { remainingTimeMs = 3 * 60000 + 12 * 1000, chargesRemaining = 40 }
+enchants[17].poison = P(3 * 60000 + 12 * 1000, 40)
 tick()
 check(bar.timer._text == "主手 4:58  副手 3:12", "countdown lists both expiring hands: " .. tostring(bar.timer._text))
-enchants[16] = { remainingTimeMs = 30 * 60000, chargesRemaining = 50 }
+enchants[16].poison = P(30 * 60000, 50)
 fire("WEAPON_ENCHANT_CHANGED")
 check(bar.timer._text == "副手 3:12", "re-poisoned main hand leaves off hand countdown: " .. tostring(bar.timer._text))
-enchants[17] = { remainingTimeMs = 25 * 60000, chargesRemaining = 40 }
+enchants[17].poison = P(25 * 60000, 40)
 tick()
 check(not bar._shown and bar.timer._text == "", "countdown clears when weapons poisoned")
 
-enchants[17] = { remainingTimeMs = 25 * 60000, chargesRemaining = 8 }
+enchants[17].poison = P(25 * 60000, 8)
 tick()
-check(bar._shown and shownItems() == "8928,8985,18262", "bar shown when off hand charges < 10")
+check(bar._shown and shownItems() == "8928,8985", "only poisons shown when off hand charges < 10: " .. shownItems())
 check(bar.timer._text == "", "no countdown when triggered only by low charges")
 
-enchants[17] = { remainingTimeMs = 25 * 60000, chargesRemaining = 40 }
+enchants[17].poison = P(25 * 60000, 40)
 tick()
 check(not bar._shown, "hidden again")
 bags[5140] = 2
@@ -253,7 +334,7 @@ fire("BAG_UPDATE_DELAYED")
 
 setCombat(true)
 fire("PLAYER_REGEN_DISABLED")
-enchants[16] = { remainingTimeMs = 9 * 60000, chargesRemaining = 50 }
+enchants[16].poison = P(9 * 60000, 50)
 tick()
 bags[8928] = 0
 fire("BAG_UPDATE_DELAYED")
