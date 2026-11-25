@@ -344,6 +344,19 @@ tick()
 check(bar._shown and shownItems() == "8928,8985", "only poisons shown when off hand charges < 10: " .. shownItems())
 check(bar.timer._text == "", "no countdown when triggered only by low charges")
 
+enchants[17].poison = { hasEnchant = true, enchantType = 2, enchantID = 603, timeLeft = 25 * 60000, charges = 0 }
+tick()
+check(not bar._shown, "chargeless crippling poison is a poison, not low charges")
+enchants[17].poison = { hasEnchant = true, enchantType = 2, enchantID = 1003, timeLeft = 25 * 60000, charges = 0 }
+tick()
+check(bar._shown and shownItems() == "8928,8985", "unlisted enchant is not taken for a poison: " .. shownItems())
+for _, id in ipairs({ 1643, 483, 14, 13, 40, 2684 }) do
+  enchants[17].stone = { hasEnchant = true, enchantType = 2, enchantID = id, timeLeft = 30 * 60000, charges = 0 }
+  enchants[17].poison = P(25 * 60000, 40)
+  tick()
+  check(not bar._shown, "stone enchant " .. id .. " counts as a stone")
+end
+enchants[17].stone = S(30 * 60000)
 enchants[17].poison = P(25 * 60000, 40)
 tick()
 check(not bar._shown, "hidden again")

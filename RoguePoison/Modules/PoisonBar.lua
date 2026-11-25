@@ -82,13 +82,13 @@ local function ReadSlot(slot)
     local list = C_Item.GetWeaponEnchantInfo(ENCHANT_SLOT[slot])
     if type(list) ~= "table" then return state end
     for _, e in ipairs(list) do
-        if IsSecret(e.hasEnchant) or IsSecret(e.timeLeft) or IsSecret(e.charges) then
+        if IsSecret(e.hasEnchant) or IsSecret(e.timeLeft) or IsSecret(e.charges) or IsSecret(e.enchantID) then
             state.unknown = true
             return state
         end
-        if e.hasEnchant and e.timeLeft and e.timeLeft > 0 then
+        local kind = ns.ENCHANT_KIND[e.enchantID]
+        if kind and e.hasEnchant and e.timeLeft and e.timeLeft > 0 then
             local charges = e.charges or 0
-            local kind = charges > 0 and "poison" or "stone"
             state.enchants[kind] = state.enchants[kind] or { timeLeft = e.timeLeft, charges = charges }
         end
     end
@@ -112,7 +112,8 @@ end
 local function KindNeeded(enchant, kind, db)
     if not enchant then return true end
     if ExpiringMs(enchant, db) then return true end
-    return kind == "poison" and db.chargesThreshold > 0 and enchant.charges < db.chargesThreshold
+    return kind == "poison" and db.chargesThreshold > 0 and enchant.charges > 0
+        and enchant.charges < db.chargesThreshold
 end
 
 local function CanApply(slot, kind)

@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.3.0
+
+- Fixed Crippling Poison, which has no charges, being reported as low on
+  charges and keeping the bar up. Poisons and sharpening stones on a weapon
+  are now told apart by their enchant, and other weapon enchants (oils,
+  weightstones, lures) are ignored.
+- 修复致残毒药因没有使用次数被当作次数不足、一直显示提醒的问题。现在按附魔区分武器上的毒药和磨刀石，
+  其他武器附魔（油、平衡石、鱼饵）不再干扰判断。
+
 ## v1.2.0
 
 - At a poison vendor with the crafting window open, two rows above "Create
