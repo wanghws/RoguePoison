@@ -38,11 +38,19 @@ end
 function ns:SetLanguage(choice)
     self.db.global.locale = choice
     self:ApplyLocale(choice)
-    if self._launcher then self._launcher.label = self.L["ADDON_TITLE"] end
+    if self._broker then self._broker.label = self.L["ADDON_TITLE"] end
+    self:ApplyBindingNames()
     self:RefreshAll()
     if self.RelocalizeOptions then
         C_Timer.After(0, function() self:RelocalizeOptions() end)
     end
+end
+
+function ns:ApplyBindingNames()
+    local L = self.L
+    _G.BINDING_HEADER_ROGUEPOISON = L["ADDON_TITLE"]
+    _G["BINDING_NAME_CLICK RoguePoisonApplyMain:LeftButton"] = L["BIND_APPLY_MAIN"]
+    _G["BINDING_NAME_CLICK RoguePoisonApplyOff:LeftButton"] = L["BIND_APPLY_OFF"]
 end
 
 function ns:SetupMinimapIcon()
@@ -51,10 +59,11 @@ function ns:SetupMinimapIcon()
     local LDBIcon = LibStub("LibDBIcon-1.0", true)
     if not LDB or not LDBIcon then return end
     local L = self.L
-    local launcher = LDB:NewDataObject(addonName, {
-        type  = "launcher",
+    local broker = LDB:NewDataObject(addonName, {
+        type  = "data source",
         icon  = ns.ICON,
         label = L["ADDON_TITLE"],
+        text  = "",
         OnClick = function(_, button)
             if button == "RightButton" then
                 self:SetLocked(not self.db.profile.locked)
@@ -64,13 +73,14 @@ function ns:SetupMinimapIcon()
         end,
         OnTooltipShow = function(tip)
             tip:AddLine(L["ADDON_TITLE"])
+            if self.AddWeaponStatus and self:AddWeaponStatus(tip) then tip:AddLine(" ") end
             tip:AddLine(L["MINIMAP_TIP_LEFT"], 1, 1, 1)
             tip:AddLine(L["MINIMAP_TIP_RIGHT"], 1, 1, 1)
             tip:AddLine("|cff9d9d9d/rpoison|r")
         end,
     })
-    LDBIcon:Register(addonName, launcher, self.db.global.minimap)
-    self._launcher = launcher
+    LDBIcon:Register(addonName, broker, self.db.global.minimap)
+    self._broker = broker
     self._minimapReady = true
 end
 
@@ -81,6 +91,7 @@ bootstrap:SetScript("OnEvent", function(self, event, arg1)
     if event == "ADDON_LOADED" and arg1 == addonName then
         ns:InitializeDB()
         ns:ApplyLocale(ns.db.global.locale)
+        ns:ApplyBindingNames()
         for _, mod in pairs(ns.modules) do
             if type(mod.OnDBReady) == "function" then mod:OnDBReady() end
         end

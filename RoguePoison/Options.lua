@@ -147,6 +147,12 @@ local function DrawChecksTab(container)
     AddSlider(container, L["OPT_CHARGES_THRESHOLD"], 0, 100, 1,
         function() return db.chargesThreshold end,
         function(v) db.chargesThreshold = v end)
+    AddCheckbox(container, L["OPT_READY_CHECK"],
+        function() return db.readyCheck end,
+        function(v) db.readyCheck = v end)
+    AddCheckbox(container, L["OPT_EXPIRE_SOUND"],
+        function() return db.expireSound end,
+        function(v) db.expireSound = v end)
 
     AddSeparator(container, L["SEC_STOCK_CHECK"])
     AddCheckbox(container, L["OPT_SHOW_WARNINGS"],
@@ -167,6 +173,12 @@ local function DrawChecksTab(container)
     AddSlider(container, L["OPT_BLIND_THRESHOLD"], 0, 100, 1,
         function() return db.blindThreshold end,
         function(v) db.blindThreshold = v end)
+    AddCheckbox(container, L["OPT_FLASH_RESTOCK"],
+        function() return db.flashRestock end,
+        function(v) db.flashRestock = v end)
+    AddSlider(container, L["OPT_FLASH_RESTOCK_TO"], 1, 100, 1,
+        function() return db.flashRestockTo end,
+        function(v) db.flashRestockTo = v end)
 end
 
 local function DrawPoisonsTab(container)
@@ -178,7 +190,7 @@ local function DrawPoisonsTab(container)
         local w = AddCheckbox(container, L["POISON_" .. key],
             function() return db.poisons[key] end,
             function(v) db.poisons[key] = v end)
-        w:SetImage(C_Item.GetItemIconByID(poison.ranks[#poison.ranks]))
+        w:SetImage(C_Item.GetItemIconByID(poison.ranks[1]))
     end
     AddLabel(container, L["OPT_POISONS_HELP"])
 end

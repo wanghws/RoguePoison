@@ -16,6 +16,10 @@ local defaults = {
         flashThreshold    = 10,
         trackBlind        = true,
         blindThreshold    = 10,
+        readyCheck        = true,
+        expireSound       = true,
+        flashRestock      = true,
+        flashRestockTo    = 20,
         buyAmount         = { stacks = 1, items = 1 },
         poisons = {
             instant     = true,
@@ -24,10 +28,15 @@ local defaults = {
             crippling   = true,
             mindnumbing = true,
             sharpening  = true,
+            weightstone = true,
+            elemental   = true,
+            consecrated = true,
         },
     },
     char = {
         seen = {},
+        lastPoison = {},
+        craftable = {},
     },
     global = {
         minimap = { hide = false },

@@ -60,8 +60,29 @@ local function newObj(parent, template)
   return o
 end
 
+local Spinner = {}
+function Spinner:SetMinMaxValues(min, max) self.min, self.max = min, max; self:SetValue(self:GetValue()) end
+function Spinner:GetValue() return self.currentValue or self.min or 0 end
+function Spinner:SetOnValueChangedCallback(fn) self.onValueChangedCallback = fn end
+function Spinner:SetValue(value)
+  local v = math.max(self.min or -math.huge, math.min(self.max or math.huge, value))
+  local changed = v ~= self.currentValue
+  if changed or (self.clampIfInputExceedsRange and v ~= value) then
+    self.currentValue = v
+    self._text = v
+    if changed and self.onValueChangedCallback then self.onValueChangedCallback(self, v) end
+  end
+end
+function Spinner:Increment(n) self:SetValue(self:GetValue() + (n or 1)) end
+function Spinner:Decrement(n) self:SetValue(self:GetValue() - (n or 1)) end
+
 function CreateFrame(_, name, parent, template)
   local f = newObj(parent, template)
+  if template == "NumericInputSpinnerTemplate" then
+    for k, v in pairs(Spinner) do f[k] = v end
+    f.IncrementButton, f.DecrementButton = newObj(f), newObj(f)
+    f._scripts.OnTextChanged = function(self) self:SetValue(tonumber(self._text) or 0) end
+  end
   frames[#frames+1] = f
   if name then _G[name] = f end
   return f
@@ -79,7 +100,7 @@ GameTooltip.AddDoubleLine = function(_, left, right) tipLines[#tipLines+1] = lef
 INVSLOT_MAINHAND, INVSLOT_OFFHAND = 16, 17
 Enum = {
   ItemClass = { Weapon = 2 },
-  ItemWeaponSubclass = { Axe1H = 0, Axe2H = 1, Mace1H = 4, Polearm = 6, Sword1H = 7, Sword2H = 8, Unarmed = 13, Dagger = 15 },
+  ItemWeaponSubclass = { Axe1H = 0, Axe2H = 1, Mace1H = 4, Mace2H = 5, Polearm = 6, Staff = 10, Sword1H = 7, Sword2H = 8, Unarmed = 13, Dagger = 15 },
   WeaponSlot = { MainHand = 0, OffHand = 1, Ranged = 2 },
   CraftingReagentType = { Modifying = 0, Basic = 1, Finishing = 2 },
 }
@@ -146,6 +167,11 @@ local deferred = {}
 C_Timer = { NewTicker = function(_, fn) tickers[#tickers+1] = fn end, After = function(_, fn) deferred[#deferred+1] = fn end }
 SlashCmdList = {}
 Settings = { RegisterCanvasLayoutCategory = function() return {} end, RegisterAddOnCategory = function() end }
+local sounds, warnings = {}, {}
+SOUNDKIT = { RAID_WARNING = 8959 }
+function PlaySound(id) sounds[#sounds+1] = id end
+ChatTypeInfo = { RAID_WARNING = {} }
+RaidWarningUtil = { AddMessage = function(text) warnings[#warnings+1] = text end }
 local lastPrint
 ERR_INV_FULL = "Inventory is full."
 function print(...)
@@ -158,6 +184,8 @@ local libs = {}
 LibStub = setmetatable({ NewLibrary = function() end }, { __call = function(_, name)
   if name == "AceGUI-3.0" then
     return FakeAceGUI
+  elseif name == "LibDataBroker-1.1" then
+    return { NewDataObject = function(_, _, obj) return obj end }
   elseif name == "AceDB-3.0" then
     return { New = function(_, _, defaults)
       local function copy(t) local r = {} for k, v in pairs(t) do r[k] = type(v) == "table" and copy(v) or v end return r end
@@ -175,7 +203,7 @@ local function load(rel)
   chunk("RoguePoison", ns)
 end
 for _, f in ipairs({ "Locales/Locales.lua", "Locales/enUS.lua", "Locales/zhCN.lua", "Locales/zhTW.lua", "Data/Poisons.lua",
-  "Init.lua", "Config.lua", "Modules/PoisonBar.lua", "Modules/ReagentBuyer.lua", "Options.lua" }) do load(f) end
+  "Init.lua", "Config.lua", "Modules/PoisonBar.lua", "Modules/ReagentBuyer.lua", "Modules/Recipes.lua", "Options.lua" }) do load(f) end
 
 local function fire(event, ...)
   for f in pairs(eventFrames) do
@@ -187,7 +215,7 @@ local function tick() for _, fn in ipairs(tickers) do fn() end end
 local function check(cond, msg) if not cond then error("FAIL: " .. msg, 2) end print("ok  " .. msg) end
 local bar
 
-bags = { [8928] = 25, [8985] = 5, [8925] = 3, [5140] = 2, [5173] = 20, [8924] = 15, [12404] = 4, [18262] = 12 }
+bags = { [8928] = 25, [8985] = 5, [8925] = 3, [5140] = 2, [5173] = 20, [8924] = 15, [7964] = 4, [12404] = 12 }
 fire("ADDON_LOADED", "RoguePoison")
 fire("PLAYER_LOGIN")
 check(ns.active, "active for rogue")
@@ -215,14 +243,14 @@ local function buttonFor(itemID)
 end
 
 check(bar._shown, "bar shown when weapons have no poison")
-check(shownItems() == "8928,8985,18262,flash", "instant, deadly, sharpening stone, low flash powder: " .. shownItems())
+check(shownItems() == "8928,8985,12404,flash", "instant, deadly, sharpening stone, low flash powder: " .. shownItems())
 check(buttonFor(8928)._attr.macrotext1 == "/use item:8928\n/use 16", "left click macro main hand")
 check(buttonFor(8928)._attr.macrotext2 == "/use item:8928\n/use 17", "right click macro off hand")
 check(buttonFor(8985)._attr.macrotext1 == "/use item:8985\n/use 16", "deadly V macro")
-check(buttonFor(18262)._attr.macrotext1 == "/use item:18262\n/use 16", "sharpening stone picks elemental over dense")
+check(buttonFor(12404)._attr.macrotext1 == "/use item:12404\n/use 16", "sharpening stone picks dense over solid")
 check(buttonFor(8985).low._text == "数量不足", "low label under deadly poison")
 check(buttonFor(8985).count._text == 5 and buttonFor(8985).count._color[2] == 0.3, "deadly count in red")
-check(buttonFor(8928).low._text == "" and buttonFor(18262).low._text == "", "no label under stocked items")
+check(buttonFor(8928).low._text == "" and buttonFor(12404).low._text == "", "no label under stocked items")
 check(flash.low._text == "数量不足", "low label under flash powder")
 check(flash.count._text == 2 and flash.count._color[2] == 0.3, "flash powder shows owned count in red")
 check(flash._point[4] == 120, "flash powder icon after the poison buttons")
@@ -233,7 +261,7 @@ check(not blind._shown, "no blinding powder icon before Blind is learned")
 enchants[16].poison = P(30 * 60000, 50)
 enchants[17].poison = P(25 * 60000, 40)
 tick()
-check(bar._shown and shownItems() == "8985,18262,flash", "stone still offered when weapons only poisoned: " .. shownItems())
+check(bar._shown and shownItems() == "8985,12404,flash", "stone still offered when weapons only poisoned: " .. shownItems())
 enchants[16].stone = S(30 * 60000)
 enchants[17].stone = S(30 * 60000)
 fire("WEAPON_ENCHANT_CHANGED")
@@ -273,7 +301,7 @@ fire("WEAPON_ENCHANT_CHANGED")
 check(not bar._shown, "hidden when both weapons have poison and stone")
 enchants[16].stone = S(3 * 60000 + 30 * 1000)
 tick()
-check(bar._shown and shownItems() == "18262", "expiring stone offers only the stone: " .. shownItems())
+check(bar._shown and shownItems() == "12404", "expiring stone offers only the stone: " .. shownItems())
 check(bar.timer._text == "主手 3:30", "countdown follows the expiring stone: " .. tostring(bar.timer._text))
 ns.db.profile.poisons.sharpening = false
 ns:RefreshAll()
@@ -289,8 +317,8 @@ fire("PLAYER_EQUIPMENT_CHANGED")
 check(not bar._shown, "mace off hand without a stone needs none")
 enchants[16].stone = nil
 fire("WEAPON_ENCHANT_CHANGED")
-check(bar._shown and shownItems() == "18262", "dagger main hand still asks for a stone: " .. shownItems())
-local stone = buttonFor(18262)
+check(bar._shown and shownItems() == "12404", "dagger main hand still asks for a stone: " .. shownItems())
+local stone = buttonFor(12404)
 check(stone._attr.type1 == "macro" and stone._attr.type2 == nil, "stone has no right-click onto a mace off hand")
 check(bar.hint._text == "左键主手", "hint omits the mace off hand for the stone")
 stone._scripts.OnEnter(stone)
@@ -298,18 +326,18 @@ check(table.concat(tipLines, ";") == " ;主手|无磨刀石; ;左键:涂抹主�
 equipped[16], equipped[17] = 1002, 1001
 enchants[17].stone = nil
 fire("PLAYER_EQUIPMENT_CHANGED")
-stone = buttonFor(18262)
-check(stone._attr.type1 == nil and stone._attr.macrotext2 == "/use item:18262\n/use 17", "stone only right-clicks onto a dagger off hand")
+stone = buttonFor(12404)
+check(stone._attr.type1 == nil and stone._attr.macrotext2 == "/use item:12404\n/use 17", "stone only right-clicks onto a dagger off hand")
 check(bar.hint._text == "右键副手", "hint names only the off hand: " .. tostring(bar.hint._text))
 equipped[17] = 1002
-bags[18262] = 3
+bags[12404] = 3
 fire("PLAYER_EQUIPMENT_CHANGED")
-stone = buttonFor(18262)
+stone = buttonFor(12404)
 check(stone and stone._attr.type1 == nil and stone._attr.type2 == nil, "low stone with two maces has no click action")
 check(bar.hint._text == "", "no hint when no hand takes the shown stone")
 stone._scripts.OnEnter(stone)
 check(#tipLines == 0, "no blank lines in the stone tooltip with two maces: " .. #tipLines)
-bags[18262] = 12
+bags[12404] = 12
 equipped[16], equipped[17] = 1000, 1001
 enchants[16].stone = S(30 * 60000)
 enchants[17].stone = S(30 * 60000)
@@ -389,9 +417,22 @@ equipped[17] = nil
 fire("PLAYER_EQUIPMENT_CHANGED")
 check(buttonFor(8985)._attr.type2 == nil, "no right-click action without off hand weapon")
 check(bar.hint._text == "左键主手", "click hint drops off hand without off hand weapon")
+local beforeRest = shownItems()
 resting = true
 fire("PLAYER_UPDATE_RESTING")
-check(not bar._shown, "bar hidden in a rest area")
+local lowOnly = {}
+for _, f in ipairs(poisonButtons()) do
+  check(f.low._text == "数量不足", "rest area keeps only low icons: " .. tostring(f.itemID))
+  lowOnly[#lowOnly + 1] = f.itemID
+end
+check(bar._shown and #lowOnly > 0 and shownItems() ~= beforeRest, "rest area drops the re-apply icons: " .. beforeRest .. " -> " .. shownItems())
+check(bar.timer._text == "", "no countdown in a rest area")
+local savedBags = {}
+for id, n in pairs(bags) do savedBags[id] = n end
+for id in pairs(bags) do bags[id] = 50 end
+bags[8928] = 50
+fire("BAG_UPDATE_DELAYED")
+check(not bar._shown, "nothing low, bar hidden in a rest area")
 setCombat(true)
 resting = false
 fire("PLAYER_UPDATE_RESTING")
@@ -399,6 +440,8 @@ check(#blocked == 0 and not bar._shown, "leaving a rest area in combat waits for
 setCombat(false)
 fire("PLAYER_REGEN_ENABLED")
 check(bar._shown, "bar back after leaving the rest area")
+for id in pairs(bags) do bags[id] = savedBags[id] end
+fire("BAG_UPDATE_DELAYED")
 resting = true
 ns.db.profile.locked = false
 ns:RefreshAll()
@@ -433,8 +476,8 @@ check(L["WARN_LOW_STOCK"] == "Low stock", "switch to English")
 check(moverLabel._text == "Drag to move", "mover label relocalized")
 ns.db.profile.locked = true
 ns:RefreshAll()
-check(bar.hint._text == "Left: main hand", "click hint relocalized")
-check(bar.timer._text == "Main hand 9:00", "countdown relocalized: " .. tostring(bar.timer._text))
+check(bar.hint._text == "Left: MH", "click hint relocalized")
+check(bar.timer._text == "MH 9:00", "countdown relocalized: " .. tostring(bar.timer._text))
 ns.db.profile.locked = false
 ns:RefreshAll()
 for _, fn in ipairs(deferred) do fn() end
@@ -479,7 +522,16 @@ local schematics = {
   [3] = { outputItemID = 12404, quantityMin = 1, reagentSlotSchematics = {
     { reagentType = 1, quantityRequired = 1, reagents = { { itemID = 12365 } } } } },
 }
-C_TradeSkillUI = { GetRecipeSchematic = function(id) return schematics[id] end }
+local tradeSkillLinked = false
+C_TradeSkillUI = {
+  GetRecipeSchematic = function(id) return schematics[id] end,
+  GetRecipeInfo = function(id) return schematics[id] and { recipeID = id, learned = schematics[id].learned ~= false } end,
+  IsTradeSkillLinked = function() return tradeSkillLinked end,
+  IsTradeSkillGuild = function() return false end,
+  IsTradeSkillGuildMember = function() return false end,
+  IsNPCCrafting = function() return false end,
+  GetFilteredRecipeIDs = function() local ids = {} for id in pairs(schematics) do ids[#ids+1] = id end table.sort(ids) return ids end,
+}
 local selectedRecipe = 1
 function hooksecurefunc(t, name, fn)
   local orig = t[name]
@@ -519,7 +571,8 @@ check(table.concat(tipLines, ";") == "Item8924|x65;Item8925|x20", "stack tooltip
 check(buyPanel.rows.stacks.cost._text == "coin20300" and buyPanel.rows.stacks.cost._color[2] == 1, "stack cost shown after its button")
 check(buyPanel.rows.items.cost._text == "", "no cost when bags hold enough")
 local stacksPt, itemsPt = buyPanel.rows.stacks.box._point, buyPanel.rows.items.box._point
-check(stacksPt[2] == buyPanel and itemsPt[2] == buyPanel and stacksPt[4] == 5 and itemsPt[4] == 5, "rows left-aligned with Create All")
+check(stacksPt[2] == buyPanel and itemsPt[2] == buyPanel and stacksPt[4] == 29 and itemsPt[4] == 29, "rows left-aligned with Create All")
+check(buyPanel.rows.stacks.unit._point[2] == buyPanel.rows.stacks.box.IncrementButton, "unit label after the > arrow")
 check(stacksPt[5] > itemsPt[5], "stacks row above items row")
 check(buyButton("stacks")._point[2] == buyPanel.rows.stacks.unit and buyButton("items")._point[4] == buyButton("stacks")._point[4], "buy buttons line up")
 check(buyPanel.rows.stacks.cost._point[2] == buyButton("stacks"), "cost anchored after the buy button")
@@ -638,17 +691,21 @@ fire("MERCHANT_UPDATE")
 buyer.Update = origUpdate
 
 local itemsBox, stacksBox = buyPanel.rows.items.box, buyPanel.rows.stacks.box
+bags[8924], bags[8925] = 0, 0
+fire("MERCHANT_UPDATE")
+itemsBox:Decrement()
+check(itemsBox._text == 1 and ns.db.profile.buyAmount.items == 1, "< arrow stops at 1")
+itemsBox:Increment()
+check(itemsBox._text == 2 and ns.db.profile.buyAmount.items == 2 and buyPanel.rows.items.cost._text == "coin2600", "> arrow adds one and reprices: " .. tostring(buyPanel.rows.items.cost._text))
+itemsBox:Decrement()
+check(ns.db.profile.buyAmount.items == 1 and buyPanel.rows.items.cost._text == "coin1400", "< arrow removes one")
+stacksBox:Increment(200)
+check(stacksBox._text == 99 and ns.db.profile.buyAmount.stacks == 99, "spinner capped at 99")
+stacksBox:Decrement(98)
 itemsBox:SetFocus()
-itemsBox._text = ""
-itemsBox._scripts.OnTextChanged(itemsBox, true)
-check(buyButton("items")._enabled == false and buyButton("stacks")._enabled == true, "empty focused input disables only its button")
 itemsBox._text = "0"
 itemsBox._scripts.OnTextChanged(itemsBox, true)
-check(buyButton("items")._enabled == false, "zero disables the button")
-check(ns.db.profile.buyAmount.items == 1, "invalid input keeps the saved amount")
-itemsBox:ClearFocus()
-check(itemsBox._text == 1 and buyButton("items")._enabled == true, "focus lost restores the amount and the button")
-itemsBox:SetFocus()
+check(itemsBox._text == 1 and ns.db.profile.buyAmount.items == 1 and buyButton("items")._enabled == true, "typed zero clamps to 1")
 itemsBox._text = "3"
 itemsBox._scripts.OnTextChanged(itemsBox, true)
 check(ns.db.profile.buyAmount.items == 3 and buyButton("items")._enabled == true, "valid input saved while focused")
@@ -693,4 +750,222 @@ lastPrint = nil
 fire("MERCHANT_CLOSED")
 check(not buyPanel._shown, "hidden when the merchant closes")
 check(lastPrint and lastPrint:find("reagent purchase stopped"), "closing mid-run is reported")
+
+check(_G["BINDING_NAME_CLICK RoguePoisonApplyMain:LeftButton"] == "Apply poison to main hand"
+  and _G.BINDING_HEADER_ROGUEPOISON == "Rogue Poison", "binding names follow the language")
+local bindMain, bindOff = _G.RoguePoisonApplyMain, _G.RoguePoisonApplyOff
+equipped[16], equipped[17] = 1000, 1001
+enchants[16], enchants[17] = {}, {}
+bags[8928], bags[8985], bags[20844] = 25, 5, 0
+wipe(ns.db.char.lastPoison)
+fire("PLAYER_ENTERING_WORLD")
+check(bindMain._attr.macrotext == "/use item:8928\n/use 16" and bindOff._attr.macrotext == "/use item:8928\n/use 17",
+  "keybinds fall back to the first poison: " .. tostring(bindMain._attr.macrotext))
+enchants[16].poison = { hasEnchant = true, enchantType = 2, enchantID = 627, timeLeft = 30 * 60000, charges = 0 }
+fire("WEAPON_ENCHANT_CHANGED")
+check(ns.db.char.lastPoison[16] == "deadly" and bindMain._attr.macrotext == "/use item:8985\n/use 16", "main hand keybind remembers deadly")
+check(bindOff._attr.macrotext == "/use item:8928\n/use 17", "off hand keybind unaffected")
+wipe(sounds)
+enchants[16].poison = nil
+fire("WEAPON_ENCHANT_CHANGED")
+check(#sounds == 1, "sound when the main hand poison wears off")
+check(bindMain._attr.macrotext == "/use item:8985\n/use 16", "remembered poison kept after it wears off")
+tick()
+check(#sounds == 1, "sound plays once")
+bags[8985] = 0
+fire("BAG_UPDATE_DELAYED")
+check(bindMain._attr.type == nil, "no keybind action when the remembered poison is out of stock")
+bags[8985] = 5
+enchants[17].poison = P(30 * 60000, 50)
+fire("WEAPON_ENCHANT_CHANGED")
+wipe(sounds)
+equipped[17] = 1002
+enchants[17].poison = nil
+fire("PLAYER_EQUIPMENT_CHANGED")
+check(#sounds == 0, "no sound when the weapon is swapped")
+equipped[17] = 1001
+enchants[17].poison = P(30 * 60000, 50)
+fire("PLAYER_EQUIPMENT_CHANGED")
+ns.db.profile.expireSound = false
+enchants[17].poison = nil
+fire("WEAPON_ENCHANT_CHANGED")
+check(#sounds == 0, "sound setting off")
+ns.db.profile.expireSound = true
+enchants[17].poison = P(30 * 60000, 50)
+fire("WEAPON_ENCHANT_CHANGED")
+setCombat(true)
+wipe(blocked)
+enchants[16].poison = P(30 * 60000, 50)
+fire("WEAPON_ENCHANT_CHANGED")
+check(#blocked == 0, "keybind update deferred in combat")
+setCombat(false)
+fire("PLAYER_REGEN_ENABLED")
+check(bindMain._attr.macrotext == "/use item:8928\n/use 16", "keybind updated after combat")
+
+enchants[16].poison = P(4 * 60000, 50)
+enchants[16].stone, enchants[17].stone = S(30 * 60000), S(30 * 60000)
+fire("WEAPON_ENCHANT_CHANGED")
+wipe(warnings); wipe(sounds)
+fire("READY_CHECK", "Leader", 30)
+check(warnings[1] == "Ready check: MH 4:00  50 charges" and #sounds == 1, "ready check warns about the expiring hand: " .. tostring(warnings[1]))
+check(ns._broker.text == "MH |cffff4d4d4m|r  OH 30m", "broker shows minutes per hand: " .. ns._broker.text)
+local brokerLines = {}
+ns._broker.OnTooltipShow({ AddLine = function(_, t) brokerLines[#brokerLines+1] = t end,
+  AddDoubleLine = function(_, l, r) brokerLines[#brokerLines+1] = l .. "|" .. r end })
+check(brokerLines[2] == "MH|Instant Poison  4:00  50 charges" and brokerLines[3] == "MH|Elemental Sharpening Stone  30:00",
+  "broker tooltip lists each hand: " .. table.concat(brokerLines, ";"))
+enchants[17].poison = nil
+fire("WEAPON_ENCHANT_CHANGED")
+check(ns._broker.text == "MH |cffff4d4d4m|r  OH |cffff4d4d-|r", "broker marks a missing poison: " .. ns._broker.text)
+wipe(warnings)
+fire("READY_CHECK", "Leader", 30)
+check(warnings[1] == "Ready check: MH 4:00  50 charges  OH No poison", "ready check lists both hands: " .. tostring(warnings[1]))
+ns.db.profile.readyCheck = false
+wipe(warnings)
+fire("READY_CHECK", "Leader", 30)
+check(#warnings == 0, "ready check setting off")
+ns.db.profile.readyCheck = true
+enchants[16].poison, enchants[17].poison = P(30 * 60000, 50), P(30 * 60000, 50)
+fire("WEAPON_ENCHANT_CHANGED")
+fire("READY_CHECK", "Leader", 30)
+check(#warnings == 0, "no ready check warning when weapons are fine")
+
+tradeSkillLinked = true
+fire("TRADE_SKILL_SHOW")
+check(next(ns.db.char.craftable) == nil, "linked profession not recorded as the player's")
+tradeSkillLinked = false
+fire("TRADE_SKILL_SHOW")
+check(ns.db.char.craftable[8928] and ns.db.char.craftable[12404] and not ns.db.char.craftable[5530], "learned poison and stone recipes recorded")
+check(ns:BetterCraftable(8927) == 8928 and ns:BetterCraftable(8928) == nil, "higher craftable rank found")
+schematics[4] = { outputItemID = 18262, quantityMin = 1, learned = false, reagentSlotSchematics = {} }
+fire("TRADE_SKILL_LIST_UPDATE")
+check(not ns.db.char.craftable[18262], "unlearned recipe not recorded")
+schematics[4].learned = true
+fire("NEW_RECIPE_LEARNED", 4)
+check(ns.db.char.craftable[18262], "newly learned recipe recorded")
+bags[8928], bags[8927] = 0, 10
+enchants[16].poison = nil
+fire("BAG_UPDATE_DELAYED")
+buttonFor(8927)._scripts.OnEnter(buttonFor(8927))
+local tipText = table.concat(tipLines, ";")
+check(tipText:find("Higher rank craftable: Item8928", 1, true), "tooltip suggests the higher rank: " .. tipText)
+buttonFor(12404)._scripts.OnEnter(buttonFor(12404))
+check(not table.concat(tipLines, ";"):find("Higher rank", 1, true), "no suggestion for the top rank")
+bags[8928], bags[8927] = 25, 0
+
+wipe(purchases)
+knownSpells[1856] = true
+bags[5140] = 2
+money = 1000000
+merchant = { { itemID = 5140, price = 25 } }
+fire("MERCHANT_SHOW")
+check(table.concat(purchases, ",") == "5140x18" and lastPrint:find("restocking Flash Powder x18", 1, true), "flash powder restocked to 20: " .. table.concat(purchases, ","))
+fire("BAG_UPDATE_DELAYED")
+fire("MERCHANT_UPDATE")
+check(#purchases == 1, "restock runs once per visit")
+fire("MERCHANT_CLOSED")
+fire("MERCHANT_SHOW")
+check(#purchases == 1, "nothing bought when already stocked")
+fire("MERCHANT_CLOSED")
+bags[5140] = 0
+ns.db.profile.flashRestockTo = 45
+local items = merchant
+merchant = { { itemID = 9999, price = 1 } }
+fire("MERCHANT_SHOW")
+check(#purchases == 1, "waits for the Flash Powder entry")
+merchant = { { itemID = 9999, price = 1 }, items[1] }
+fire("MERCHANT_UPDATE")
+for _ = 1, 3 do fire("BAG_UPDATE_DELAYED") end
+check(table.concat(purchases, ",") == "5140x18,5140x20,5140x20,5140x5", "restock split into max-stack chunks: " .. table.concat(purchases, ","))
+fire("MERCHANT_CLOSED")
+wipe(purchases)
+bags[5140] = 0
+money = 100
+lastPrint = nil
+fire("MERCHANT_SHOW")
+for _ = 1, 3 do fire("BAG_UPDATE_DELAYED") end
+check(table.concat(purchases, ",") == "5140x4", "restock limited to what the player can afford: " .. table.concat(purchases, ","))
+fire("MERCHANT_CLOSED")
+wipe(purchases)
+bags[5140] = 0
+money = 10
+fire("MERCHANT_SHOW")
+check(#purchases == 0 and lastPrint:find("not enough gold to restock", 1, true), "no gold, no restock")
+fire("MERCHANT_CLOSED")
+money = 1000000
+ns.db.profile.flashRestock = false
+fire("MERCHANT_SHOW")
+check(#purchases == 0, "restock setting off")
+fire("MERCHANT_CLOSED")
+ns.db.profile.flashRestock = true
+knownSpells[1856] = nil
+fire("MERCHANT_SHOW")
+check(#purchases == 0, "no restock without Vanish")
+fire("MERCHANT_CLOSED")
+knownSpells[1856] = true
+
+local function E(id) return { hasEnchant = true, enchantType = 2, enchantID = id, timeLeft = 30 * 60000, charges = 0 } end
+ns.db.profile.locked = true
+equipped[16], equipped[17] = 1000, 1002
+enchants[16], enchants[17] = { poison = P(30 * 60000, 50) }, { poison = P(30 * 60000, 50) }
+bags[12404], bags[12643], bags[18262], bags[23122] = 12, 12, 0, 0
+fire("PLAYER_EQUIPMENT_CHANGED")
+local dense, weight = buttonFor(12404), buttonFor(12643)
+check(dense and weight and not buttonFor(18262), "dense for the dagger, weightstone for the mace: " .. shownItems())
+check(dense._attr.macrotext1 == "/use item:12404\n/use 16" and dense._attr.type2 == nil, "sharpening stone only onto the dagger")
+check(weight._attr.type1 == nil and weight._attr.macrotext2 == "/use item:12643\n/use 17", "weightstone only onto the mace")
+weight._scripts.OnEnter(weight)
+check(table.concat(tipLines, ";") == " ;OH|No sharpening stone; ;Right-click: apply to off hand", "weightstone tooltip covers only the mace: " .. table.concat(tipLines, ";"))
+check(bar.hint._text == "Left: MH  Right: OH", "hint covers both stones: " .. tostring(bar.hint._text))
+bags[18262] = 12
+fire("BAG_UPDATE_DELAYED")
+local elemental = buttonFor(18262)
+check(elemental and elemental._attr.macrotext1 == "/use item:18262\n/use 16" and elemental._attr.macrotext2 == "/use item:18262\n/use 17", "elemental fits any melee weapon")
+enchants[17].stone = E(1703)
+fire("WEAPON_ENCHANT_CHANGED")
+check(not buttonFor(12643) and buttonFor(12404) and buttonFor(18262), "weighted mace needs no more stone: " .. shownItems())
+enchants[16].stone = E(2684)
+fire("WEAPON_ENCHANT_CHANGED")
+check(not buttonFor(12404) and not buttonFor(18262) and not buttonFor(12643), "consecrated stone counts as the dagger's stone: " .. shownItems())
+wipe(sounds)
+enchants[17].stone = nil
+fire("WEAPON_ENCHANT_CHANGED")
+check(#sounds == 1 and buttonFor(12643), "weightstone wearing off sounds and offers it again")
+equipped[17] = 1001
+enchants[17].stone = nil
+bags[12643] = 3
+fire("PLAYER_EQUIPMENT_CHANGED")
+weight = buttonFor(12643)
+check(weight and weight.low._text == "Low stock" and weight._attr.type1 == nil and weight._attr.type2 == nil, "low weightstone with two daggers shows but cannot be applied")
+bags[12643] = 12
+fire("BAG_UPDATE_DELAYED")
+check(not buttonFor(12643), "stocked weightstone hidden with no blunt weapon")
+ns.db.profile.poisons.weightstone = false
+ns.db.profile.poisons.elemental = false
+equipped[17] = 1002
+fire("PLAYER_EQUIPMENT_CHANGED")
+check(not buttonFor(12643), "unchecked weightstone not offered for the mace")
+check(ns._broker.text:find("OH 30m", 1, true), "no checked stone fits the mace, so it is not asked for one: " .. ns._broker.text)
+ns.db.profile.poisons.weightstone = true
+ns.db.profile.poisons.elemental = true
+
+enchants[16], enchants[17] = { poison = P(30 * 60000, 50) }, { poison = P(30 * 60000, 50) }
+bags[12404], bags[12643], bags[23122], bags[18262], bags[287980] = 0, 0, 0, 5, 20
+fire("BAG_UPDATE_DELAYED")
+local elem = buttonFor(18262)
+check(elem and not buttonFor(287980), "original and Forever elemental share one icon: " .. shownItems())
+check(elem.count._text == 25 and elem.low._text == "", "both copies counted together: " .. tostring(elem.count._text))
+check(elem._attr.macrotext1 == "/use item:18262\n/use 16", "uses the original while it is in the bags")
+bags[18262] = 0
+fire("BAG_UPDATE_DELAYED")
+elem = buttonFor(287980)
+check(elem and elem.count._text == 20 and elem._attr.macrotext2 == "/use item:287980\n/use 17", "falls back to the Forever copy in the bags")
+wipe(ns.db.char.craftable)
+ns.db.char.craftable[18262], ns.db.char.craftable[2862] = true, true
+elem._scripts.OnEnter(elem)
+check(not table.concat(tipLines, ";"):find("Higher rank", 1, true), "Forever elemental not told the original is a higher rank")
+check(ns:BetterCraftable(287978) == nil and ns:BetterCraftable(287980) == nil, "same-rank originals are not higher ranks")
+ns.db.char.craftable[2863] = true
+check(ns:BetterCraftable(287978) == 2863, "a real higher rank still found for the Forever rough stone")
+bags[287980] = 0
 print("ALL PASSED")

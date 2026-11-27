@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.4.0
+
+- New: main-hand / off-hand poison keybinds that reuse each hand's last poison, a ready-check warning and a wear-off sound for missing or expiring poisons and stones, minutes left per hand on data-broker bars, Flash Powder auto-restock to 20 at vendors, a tooltip hint when a higher rank is craftable, and < > arrows on the reagent buy amounts. Weightstones and Consecrated Sharpening Stones are supported, each stone is only offered for weapons it fits (Elemental now works on maces too), rest areas now keep low-stock icons and only drop the re-apply prompts, and English labels use MH / OH.
+- 新增：主手 / 副手涂毒快捷键（沿用该手上次的毒药）、就位确认时和毒药 / 石头消失时的提醒、信息条插件显示每只手剩余分钟数、在商人处自动补充闪光粉到 20 个、可制作更高等级时的鼠标提示，以及购买材料数量的 < > 箭头。支持平衡石和神圣磨刀石，每种石头只对适用的武器提示（元素磨刀石现在也可用于锤），休息区只隐藏补涂提示、保留库存不足提醒，英文界面改用 MH / OH 缩写。
+
 ## v1.3.0
 
 - Fixed Crippling Poison, which has no charges, being reported as low on

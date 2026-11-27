@@ -7,8 +7,8 @@ ns:RegisterModule("poisonBar", M)
 local MAIN_HAND = INVSLOT_MAINHAND or 16
 local OFF_HAND  = INVSLOT_OFFHAND or 17
 local HANDS = {
-    { slot = MAIN_HAND, label = "TIP_MAIN_HAND", click = "TIP_LEFT_CLICK" },
-    { slot = OFF_HAND,  label = "TIP_OFF_HAND",  click = "TIP_RIGHT_CLICK" },
+    { slot = MAIN_HAND, label = "TIP_MAIN_HAND", click = "TIP_LEFT_CLICK",  binding = "ApplyMain" },
+    { slot = OFF_HAND,  label = "TIP_OFF_HAND",  click = "TIP_RIGHT_CLICK", binding = "ApplyOff" },
 }
 local ENCHANT_SLOT = {
     [MAIN_HAND] = Enum.WeaponSlot.MainHand,
@@ -25,22 +25,33 @@ local BLADED = {
     [SUBCLASS.Polearm] = true,
     [SUBCLASS.Dagger]  = true,
 }
+local BLUNT = {
+    [SUBCLASS.Mace1H]  = true,
+    [SUBCLASS.Mace2H]  = true,
+    [SUBCLASS.Staff]   = true,
+    [SUBCLASS.Unarmed] = true,
+}
+local MELEE = {}
+for subclassID in pairs(BLADED) do MELEE[subclassID] = true end
+for subclassID in pairs(BLUNT) do MELEE[subclassID] = true end
+local FITS = { bladed = BLADED, blunt = BLUNT, melee = MELEE }
 local FALLBACK_ICON = 134400
 local TICK_SECONDS = 1
 local SMALL_TEXT_SCALE = 0.75
+local ALERT_COLOR = "|cffff4d4d"
 
 local REAGENTS = {
     {
         name      = "FlashPowder",
         itemID    = ns.ITEM.FLASH_POWDER,
-        spells    = { 1856, 1857 },
+        spells    = ns.SPELLS.VANISH,
         trackKey  = "trackFlash",
         threshKey = "flashThreshold",
     },
     {
         name      = "BlindingPowder",
         itemID    = ns.ITEM.BLINDING_POWDER,
-        spells    = { 2094 },
+        spells    = ns.SPELLS.BLIND,
         trackKey  = "trackBlind",
         threshKey = "blindThreshold",
     },
@@ -51,34 +62,49 @@ local buttons = {}
 local reagentIcons = {}
 local reagentTracked = {}
 local entries = {}
-local trackedKinds = {}
 local slotStates = {}
-local needs = { poison = false, stone = false }
+local needs = { [MAIN_HAND] = {}, [OFF_HAND] = {} }
+local lastKnown = {}
+local bindButtons = {}
 local pendingSecure = false
 
 local function IsSecret(v)
     return issecretvalue ~= nil and issecretvalue(v) == true
 end
 
-local function Count(itemID)
+local function RawCount(itemID)
     return C_Item.GetItemCount(itemID) or 0
+end
+
+local function Count(itemID)
+    local total = 0
+    for _, id in ipairs(ns.SAME_RANK[itemID] or { itemID }) do
+        total = total + RawCount(id)
+    end
+    return total
+end
+
+local function InStock(itemID)
+    for _, id in ipairs(ns.SAME_RANK[itemID] or { itemID }) do
+        if RawCount(id) > 0 then return id end
+    end
+    return nil
 end
 
 local function IsLow(db, count, threshold)
     return db.showWarnings and count < threshold
 end
 
-local function HasWeapon(slot)
-    local itemID = GetInventoryItemID("player", slot)
-    if not itemID then return false end
-    local _, _, _, _, _, classID, subclassID = C_Item.GetItemInfoInstant(itemID)
-    return classID == WEAPON_CLASS, subclassID
-end
-
 local function ReadSlot(slot)
-    local isWeapon, subclassID = HasWeapon(slot)
-    if not isWeapon then return nil end
-    local state = { takes = { poison = true, stone = BLADED[subclassID] == true }, enchants = {} }
+    local itemID = GetInventoryItemID("player", slot)
+    if not itemID then return nil end
+    local _, _, _, _, _, classID, subclassID = C_Item.GetItemInfoInstant(itemID)
+    if classID ~= WEAPON_CLASS then return nil end
+    local state = { itemID = itemID, subclassID = subclassID, takes = {}, enchants = {} }
+    for _, entry in ipairs(entries) do
+        local poison = ns.ITEM_TYPE[entry]
+        if poison.fits == "any" or FITS[poison.fits][subclassID] then state.takes[poison.kind] = true end
+    end
     local list = C_Item.GetWeaponEnchantInfo(ENCHANT_SLOT[slot])
     if type(list) ~= "table" then return state end
     for _, e in ipairs(list) do
@@ -89,7 +115,8 @@ local function ReadSlot(slot)
         local kind = ns.ENCHANT_KIND[e.enchantID]
         if kind and e.hasEnchant and e.timeLeft and e.timeLeft > 0 then
             local charges = e.charges or 0
-            state.enchants[kind] = state.enchants[kind] or { timeLeft = e.timeLeft, charges = charges }
+            state.enchants[kind] = state.enchants[kind]
+                or { timeLeft = e.timeLeft, charges = charges, type = ns.ENCHANT_TYPE[e.enchantID] }
         end
     end
     return state
@@ -116,9 +143,19 @@ local function KindNeeded(enchant, kind, db)
         and enchant.charges < db.chargesThreshold
 end
 
-local function CanApply(slot, kind)
+local function CanApply(slot, itemID)
     local state = slotStates[slot]
-    return state ~= nil and state.takes[kind]
+    if not state then return false end
+    local poison = ns.ITEM_TYPE[itemID]
+    return poison.fits == "any" or FITS[poison.fits][state.subclassID] == true
+end
+
+local function NeededBy(itemID)
+    local kind = ns.ITEM_KIND[itemID]
+    for _, hand in ipairs(HANDS) do
+        if needs[hand.slot][kind] and CanApply(hand.slot, itemID) then return true end
+    end
+    return false
 end
 
 local function SlotExpiringMs(slot, db)
@@ -126,17 +163,10 @@ local function SlotExpiringMs(slot, db)
     if not state then return nil end
     local soonest
     for kind, enchant in pairs(state.enchants) do
-        local ms = trackedKinds[kind] and state.takes[kind] and ExpiringMs(enchant, db)
+        local ms = state.takes[kind] and ExpiringMs(enchant, db)
         if ms and (not soonest or ms < soonest) then soonest = ms end
     end
     return soonest
-end
-
-local function KnowsAny(spells)
-    for _, spellID in ipairs(spells) do
-        if IsPlayerSpell(spellID) then return true end
-    end
-    return false
 end
 
 local function FormatTime(ms)
@@ -179,20 +209,29 @@ local function ButtonOnEnter(self)
     local usable = Count(self.itemID) > 0
     local status, clicks = {}, {}
     for _, hand in ipairs(HANDS) do
-        local text, missing = SlotStatus(hand.slot, kind)
+        local text, missing
+        if CanApply(hand.slot, self.itemID) then text, missing = SlotStatus(hand.slot, kind) end
         if text then
             local shade = missing and 0.3 or 1
             status[#status + 1] = function()
                 GameTooltip:AddDoubleLine(L[hand.label], text, 1, 1, 1, 1, shade, shade)
             end
         end
-        if usable and CanApply(hand.slot, kind) then
+        if usable and CanApply(hand.slot, self.itemID) then
             clicks[#clicks + 1] = function() GameTooltip:AddLine(L[hand.click], 0.3, 1, 0.3) end
         end
+    end
+    local craft = {}
+    local better = ns:BetterCraftable(self.itemID)
+    local betterName = better and C_Item.GetItemNameByID(better)
+    if better and not betterName then C_Item.RequestLoadItemDataByID(better) end
+    if betterName then
+        craft[1] = function() GameTooltip:AddLine(L["TIP_CRAFT_HIGHER"]:format(betterName), 1, 0.82, 0) end
     end
     GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
     GameTooltip:SetItemByID(self.itemID)
     AddSection(status)
+    AddSection(craft)
     AddSection(clicks)
     GameTooltip:Show()
 end
@@ -262,14 +301,35 @@ local function GetButton(index)
     return b
 end
 
+local function SetMacro(b, suffix, itemID, slot)
+    b:SetAttribute("type" .. suffix, itemID and "macro" or nil)
+    b:SetAttribute("macrotext" .. suffix, itemID and ("/use item:%d\n/use %d"):format(itemID, slot) or nil)
+end
+
 local function SetClickActions(b, itemID)
     local usable = Count(itemID) > 0
-    local kind = ns.ITEM_KIND[itemID]
     for button, hand in ipairs(HANDS) do
-        local apply = usable and CanApply(hand.slot, kind)
-        b:SetAttribute("type" .. button, apply and "macro" or nil)
-        b:SetAttribute("macrotext" .. button, apply and ("/use item:%d\n/use %d"):format(itemID, hand.slot) or nil)
+        SetMacro(b, button, usable and CanApply(hand.slot, itemID) and itemID or nil, hand.slot)
     end
+end
+
+local function BestInBags(poison)
+    for _, itemID in ipairs(poison.ranks) do
+        local inStock = InStock(itemID)
+        if inStock then return inStock end
+    end
+    return nil
+end
+
+local function BindingItem(slot)
+    if not slotStates[slot] then return nil end
+    local key = ns.db.char.lastPoison[slot]
+    local remembered = key and ns.TYPE_BY_KEY[key]
+    if remembered then return BestInBags(remembered) end
+    for _, itemID in ipairs(entries) do
+        if ns.ITEM_KIND[itemID] == "poison" and Count(itemID) > 0 then return itemID end
+    end
+    return nil
 end
 
 local function SaveAnchor()
@@ -331,13 +391,21 @@ local function CreateFrames()
         SaveAnchor()
     end)
     mover:Hide()
+
+    for _, hand in ipairs(HANDS) do
+        local b = CreateFrame("Button", addonName .. hand.binding, UIParent, "SecureActionButtonTemplate")
+        b:RegisterForClicks("LeftButtonDown", "LeftButtonUp")
+        b:Hide()
+        bindButtons[hand.slot] = b
+    end
 end
 
 local function ResolveRank(poison, seen)
     local seenItem = seen[poison.key]
-    local seenIndex = seenItem and ns.RANK_INDEX[seenItem]
-    for index, itemID in ipairs(poison.ranks) do
-        if Count(itemID) > 0 then
+    local seenIndex = seenItem and ns.ITEM_TYPE[seenItem] == poison and ns.RANK_INDEX[seenItem]
+    for index, rankItem in ipairs(poison.ranks) do
+        local itemID = InStock(rankItem)
+        if itemID then
             if not seenIndex or index < seenIndex then
                 seen[poison.key] = itemID
             end
@@ -350,19 +418,53 @@ end
 function M:Scan()
     local db, seen = ns.db.profile, ns.db.char.seen
     wipe(entries)
-    wipe(trackedKinds)
     for _, poison in ipairs(ns.POISON_TYPES) do
         if db.poisons[poison.key] then
             local itemID = ResolveRank(poison, seen)
             if itemID then
                 entries[#entries + 1] = itemID
-                trackedKinds[poison.kind] = true
             end
         end
     end
     for i, reagent in ipairs(REAGENTS) do
-        reagentTracked[i] = db[reagent.trackKey] and KnowsAny(reagent.spells)
+        reagentTracked[i] = db[reagent.trackKey] and ns:KnowsAny(reagent.spells)
     end
+end
+
+local function DetectExpiry(db)
+    local expired = false
+    for _, hand in ipairs(HANDS) do
+        local slot, state = hand.slot, slotStates[hand.slot]
+        if not state then
+            lastKnown[slot] = nil
+        elseif not state.unknown then
+            local prev = lastKnown[slot]
+            if prev and prev.itemID == state.itemID then
+                for kind in pairs(prev.kinds) do
+                    if state.takes[kind] and not state.enchants[kind] then expired = true end
+                end
+            end
+            local kinds = {}
+            for kind in pairs(state.enchants) do kinds[kind] = true end
+            lastKnown[slot] = { itemID = state.itemID, kinds = kinds }
+        end
+    end
+    if expired and db.enabled and db.expireSound then PlaySound(SOUNDKIT.RAID_WARNING) end
+end
+
+local function RememberPoisons()
+    local remembered = ns.db.char.lastPoison
+    local changed = false
+    for _, hand in ipairs(HANDS) do
+        local state = KnownState(hand.slot)
+        local poison = state and state.enchants.poison
+        local key = poison and poison.type.key
+        if key and remembered[hand.slot] ~= key then
+            remembered[hand.slot] = key
+            changed = true
+        end
+    end
+    return changed
 end
 
 function M:EvaluateNeeds()
@@ -370,16 +472,16 @@ function M:EvaluateNeeds()
     for _, hand in ipairs(HANDS) do
         slotStates[hand.slot] = ReadSlot(hand.slot)
     end
-    local changed = false
-    for _, kind in ipairs(KINDS) do
-        local need = false
-        for _, hand in ipairs(HANDS) do
-            local state = KnownState(hand.slot)
-            if state and state.takes[kind] and KindNeeded(state.enchants[kind], kind, db) then need = true end
-        end
-        if needs[kind] ~= need then
-            needs[kind] = need
-            changed = true
+    DetectExpiry(db)
+    local changed = RememberPoisons()
+    for _, hand in ipairs(HANDS) do
+        local state = KnownState(hand.slot)
+        for _, kind in ipairs(KINDS) do
+            local need = state ~= nil and state.takes[kind] == true and KindNeeded(state.enchants[kind], kind, db)
+            if needs[hand.slot][kind] ~= need then
+                needs[hand.slot][kind] = need
+                changed = true
+            end
         end
     end
     return changed
@@ -396,6 +498,7 @@ function M:ApplySecure()
     local anchor = db.anchor
     local size, spacing = db.iconSize, db.spacing
     local preview = not db.locked
+    local resting = IsResting()
 
     container:ClearAllPoints()
     container:SetPoint(anchor.point, UIParent, anchor.relativePoint, anchor.x, anchor.y)
@@ -403,7 +506,7 @@ function M:ApplySecure()
     local items = {}
     for _, itemID in ipairs(entries) do
         local count = Count(itemID)
-        if preview or IsLow(db, count, db.poisonThreshold) or (needs[ns.ITEM_KIND[itemID]] and count > 0) then
+        if preview or IsLow(db, count, db.poisonThreshold) or (not resting and count > 0 and NeededBy(itemID)) then
             items[#items + 1] = itemID
         end
     end
@@ -416,9 +519,8 @@ function M:ApplySecure()
     local clickMain, clickOff = false, false
     for i, itemID in ipairs(items) do
         if Count(itemID) > 0 then
-            local kind = ns.ITEM_KIND[itemID]
-            clickMain = clickMain or CanApply(MAIN_HAND, kind)
-            clickOff = clickOff or CanApply(OFF_HAND, kind)
+            clickMain = clickMain or CanApply(MAIN_HAND, itemID)
+            clickOff = clickOff or CanApply(OFF_HAND, itemID)
         end
         local b = GetButton(i)
         PlaceIcon(b, i, size, spacing)
@@ -430,6 +532,9 @@ function M:ApplySecure()
     for i = #items + 1, #buttons do
         buttons[i].itemID = nil
         buttons[i]:Hide()
+    end
+    for _, hand in ipairs(HANDS) do
+        SetMacro(bindButtons[hand.slot], "", db.enabled and BindingItem(hand.slot) or nil, hand.slot)
     end
 
     local shownCount = #items
@@ -455,13 +560,85 @@ function M:ApplySecure()
     end
     mover.label:SetText(L["MOVER_LABEL"])
     mover:SetShown(preview and db.enabled)
-    container:SetShown(db.enabled and shownCount > 0 and (preview or not IsResting()))
+    container:SetShown(db.enabled and shownCount > 0)
+end
+
+local function HandSummary(slot, db)
+    local state = slotStates[slot]
+    if not state then return nil end
+    if state.unknown then return "?" end
+    local soonest, needed
+    for _, kind in ipairs(KINDS) do
+        if state.takes[kind] then
+            local enchant = state.enchants[kind]
+            if not enchant then return ALERT_COLOR .. "-|r" end
+            needed = needed or KindNeeded(enchant, kind, db)
+            if not soonest or enchant.timeLeft < soonest then soonest = enchant.timeLeft end
+        end
+    end
+    if not soonest then return nil end
+    local text = L["BROKER_MINUTES"]:format(math.ceil(soonest / 60000))
+    return needed and (ALERT_COLOR .. text .. "|r") or text
+end
+
+function M:UpdateBroker()
+    local broker = ns._broker
+    if not broker then return end
+    local db = ns.db.profile
+    local parts = {}
+    if db.enabled then
+        for _, hand in ipairs(HANDS) do
+            local text = HandSummary(hand.slot, db)
+            if text then parts[#parts + 1] = L[hand.label] .. " " .. text end
+        end
+    end
+    broker.text = table.concat(parts, "  ")
+end
+
+function ns:AddWeaponStatus(tip)
+    local added = false
+    for _, hand in ipairs(HANDS) do
+        for _, kind in ipairs(KINDS) do
+            local text, missing = SlotStatus(hand.slot, kind)
+            if text then
+                local enchant = not missing and slotStates[hand.slot].enchants[kind]
+                if enchant then text = L["POISON_" .. enchant.type.key] .. "  " .. text end
+                local shade = missing and 0.3 or 1
+                tip:AddDoubleLine(L[hand.label], text, 1, 1, 1, 1, shade, shade)
+                added = true
+            end
+        end
+    end
+    return added
+end
+
+function M:OnReadyCheck()
+    local db = ns.db.profile
+    if not (db.enabled and db.readyCheck) then return end
+    self:OnTick()
+    local parts = {}
+    for _, hand in ipairs(HANDS) do
+        local state = KnownState(hand.slot)
+        local statuses = {}
+        for _, kind in ipairs(KINDS) do
+            if state and state.takes[kind] and KindNeeded(state.enchants[kind], kind, db) then
+                statuses[#statuses + 1] = SlotStatus(hand.slot, kind)
+            end
+        end
+        if #statuses > 0 then parts[#parts + 1] = L[hand.label] .. " " .. table.concat(statuses, " / ") end
+    end
+    if #parts == 0 then return end
+    local text = L["READY_CHECK_WARN"]:format(table.concat(parts, "  "))
+    RaidWarningUtil.AddMessage(text, ChatTypeInfo.RAID_WARNING)
+    PlaySound(SOUNDKIT.RAID_WARNING)
+    ns:Print(text)
 end
 
 function M:UpdateTimer()
+    self:UpdateBroker()
     local db = ns.db.profile
     ApplyFont(container.timer, SmallFontSize(db))
-    if not db.locked then
+    if not db.locked or IsResting() then
         container.timer:SetText("")
         return
     end
@@ -530,9 +707,15 @@ function M:OnPlayerLogin()
     events:RegisterEvent("PLAYER_REGEN_ENABLED")
     events:RegisterEvent("SPELLS_CHANGED")
     events:RegisterEvent("PLAYER_UPDATE_RESTING")
+    events:RegisterEvent("READY_CHECK")
     events:SetScript("OnEvent", function(_, event)
         if event == "WEAPON_ENCHANT_CHANGED" then
             M:OnTick()
+        elseif event == "READY_CHECK" then
+            M:OnReadyCheck()
+        elseif event == "PLAYER_ENTERING_WORLD" then
+            wipe(lastKnown)
+            M:Refresh()
         elseif event == "PLAYER_REGEN_ENABLED" then
             if pendingSecure then M:Refresh() end
         else

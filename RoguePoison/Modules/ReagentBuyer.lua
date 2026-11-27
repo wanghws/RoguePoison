@@ -9,6 +9,7 @@ local MODES = { "stacks", "items" }
 local UNIT_KEY = { stacks = "BUY_UNIT_STACKS", items = "BUY_UNIT_ITEMS" }
 local MAX_AMOUNT = 99
 local ROW_HEIGHT = 24
+local BOX_LEFT = 29
 local PURCHASE_ERRORS = {
     "ERR_INV_FULL",
     "ERR_BAG_FULL",
@@ -20,6 +21,7 @@ local PURCHASE_ERRORS = {
 
 local panel
 local merchantOpen = false
+local restockPending = false
 local job
 local loading = {}
 
@@ -162,14 +164,46 @@ local function NextPurchase()
     BuyMerchantItem(order.index, n)
 end
 
+local function RunOrders(orders)
+    job = { orders = orders }
+    M:Update()
+    NextPurchase()
+end
+
 local function StartJob(mode)
     if job then return end
     local orders, cost, short = CurrentPlan(mode)
     if not orders or short or #orders == 0 then return end
     if GetMoney() < cost then return end
-    job = { orders = orders }
-    M:Update()
-    NextPurchase()
+    RunOrders(orders)
+end
+
+local function Restock()
+    local db = ns.db.profile
+    if not (db.enabled and db.flashRestock and ns:KnowsAny(ns.SPELLS.VANISH)) then
+        restockPending = false
+        return
+    end
+    if job then return end
+    local itemID = ns.ITEM.FLASH_POWDER
+    local s = MerchantStock()[itemID]
+    if not s then return end
+    restockPending = false
+    local missing = db.flashRestockTo - Count(itemID)
+    if missing <= 0 then return end
+    local bundles = math.ceil(missing / s.step)
+    if s.available >= 0 then bundles = math.min(bundles, s.available) end
+    if bundles <= 0 then return end
+    if s.price > 0 then
+        bundles = math.min(bundles, math.floor(GetMoney() / s.price))
+        if bundles <= 0 then
+            ns:Print(L["RESTOCK_NO_GOLD"])
+            return
+        end
+    end
+    local quantity = bundles * s.step
+    ns:Print(L["RESTOCK_FLASH"]:format(quantity))
+    RunOrders({ { itemID = itemID, index = s.index, chunk = s.chunk, quantity = quantity } })
 end
 
 local function HideTooltipOf(button)
@@ -207,35 +241,23 @@ local function ShowPlanTooltip(button)
     GameTooltip:Show()
 end
 
-local function ReadAmount(box)
-    local value = tonumber(box:GetText())
-    if not value or value < 1 then return nil end
-    return math.min(math.floor(value), MAX_AMOUNT)
-end
-
 local function CreateRow(mode, index)
-    local box = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
-    box:SetSize(26, 20)
-    box:SetAutoFocus(false)
-    box:SetNumeric(true)
+    local box = CreateFrame("EditBox", nil, panel, "NumericInputSpinnerTemplate")
+    box.clampIfInputExceedsRange = true
+    box.highlightIfInputExceedsRange = true
     box:SetMaxLetters(2)
     box:SetJustifyH("CENTER")
-    box:SetPoint("LEFT", panel, "BOTTOMLEFT", 5, (#MODES - index + 0.5) * ROW_HEIGHT)
-    box:SetScript("OnTextChanged", function(self, userInput)
-        if not userInput then return end
-        local value = ReadAmount(self)
-        if value then ns.db.profile.buyAmount[mode] = value end
+    box:SetPoint("LEFT", panel, "BOTTOMLEFT", BOX_LEFT, (#MODES - index + 0.5) * ROW_HEIGHT)
+    box:SetMinMaxValues(1, MAX_AMOUNT)
+    box:SetOnValueChangedCallback(function(_, value)
+        if value == ns.db.profile.buyAmount[mode] then return end
+        ns.db.profile.buyAmount[mode] = value
         M:Update()
     end)
     box:SetScript("OnEnterPressed", EditBox_ClearFocus)
-    box:SetScript("OnEscapePressed", EditBox_ClearFocus)
-    box:SetScript("OnEditFocusLost", function(self)
-        self:SetText(ns.db.profile.buyAmount[mode])
-        M:Update()
-    end)
 
     local unit = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    unit:SetPoint("LEFT", box, "RIGHT", 3, 0)
+    unit:SetPoint("LEFT", box.IncrementButton, "RIGHT", 3, 0)
 
     local button = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     button:SetSize(52, 22)
@@ -285,11 +307,10 @@ function M:Update()
     end
     for _, mode in ipairs(MODES) do
         local row = panel.rows[mode]
-        if not row.box:HasFocus() then row.box:SetText(db.buyAmount[mode]) end
+        row.box:SetValue(db.buyAmount[mode])
         row.button:SetText(L["BUY_BUTTON"])
         row.button:ClearAllPoints()
         row.button:SetPoint("LEFT", row.unit, "LEFT", unitWidth + 4, 0)
-        local invalid = row.box:HasFocus() and ReadAmount(row.box) == nil
         local orders, cost, short = PlanFor(recipe, stock, mode)
         local priced = orders ~= nil and not short and #orders > 0
         local affordable = priced and GetMoney() >= cost
@@ -300,7 +321,7 @@ function M:Update()
         else
             row.cost:SetText("")
         end
-        row.button:SetEnabled(job == nil and not invalid and affordable)
+        row.button:SetEnabled(job == nil and affordable)
         if GameTooltip:IsOwned(row.button) then ShowPlanTooltip(row.button) end
     end
 end
@@ -314,9 +335,12 @@ local function OnEvent(_, event, arg1, arg2)
         if arg1 == PROFESSIONS_ADDON and not panel then CreatePanel() end
     elseif event == "MERCHANT_SHOW" then
         merchantOpen = true
+        restockPending = true
+        Restock()
         M:Update()
     elseif event == "MERCHANT_CLOSED" then
         merchantOpen = false
+        restockPending = false
         if job then FinishJob(true) else M:Update() end
     elseif event == "ITEM_DATA_LOAD_RESULT" then
         if loading[arg1] and arg2 then
@@ -329,6 +353,7 @@ local function OnEvent(_, event, arg1, arg2)
         if job and job.index and GetMerchantItemID(job.index) ~= job.itemID then
             FinishJob(true)
         else
+            if restockPending then Restock() end
             M:Update()
         end
     elseif event == "BAG_UPDATE_DELAYED" then
